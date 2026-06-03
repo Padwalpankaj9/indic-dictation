@@ -158,7 +158,7 @@ enum AppSettings {
     static func loadDictationQualityMode() -> DictationQualityMode {
         guard let rawValue = UserDefaults.standard.string(forKey: dictationQualityModeKey),
               let mode = DictationQualityMode(rawValue: rawValue) else {
-            return .balanced
+            return .accurate
         }
         return mode
     }

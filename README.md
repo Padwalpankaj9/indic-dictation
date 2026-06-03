@@ -89,8 +89,8 @@ Use the menu bar menu to:
 - Choose the microphone input or refresh connected microphones.
 - Choose the response mode:
   - Fast: lowest latency for short commands.
-  - Balanced: recommended default for normal dictation.
-  - Accurate: waits longer for more context.
+  - Balanced: good fallback for normal dictation.
+  - Accurate: recommended default; waits longer for more context.
 - Toggle the live preview text.
 - Copy the last English result.
 - Open permission settings.
