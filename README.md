@@ -10,6 +10,10 @@ The app is a native macOS wrapper around Sarvam's speech-to-text translation API
 
 The current implementation is Marathi-first. The architecture is intentionally small enough to adapt to other Indic languages supported by Sarvam.
 
+## Project status
+
+Indic Dictation is early but usable. The native macOS app supports low-latency Marathi-to-English dictation today, and the next major direction is making the language layer configurable so the same workflow can support more Indian languages.
+
 ## What it does
 
 - Runs as a native Swift menu bar app.
@@ -99,6 +103,27 @@ The installed Swift app needs these macOS permissions:
 - Notifications: shows permission and error notifications.
 
 The menu bar app shows a permission summary and has direct links to the relevant System Settings panes.
+
+## Privacy and API keys
+
+- Audio is captured locally and streamed to Sarvam for speech-to-text translation.
+- Final English text is inserted into the currently focused app on your Mac.
+- API keys are read from the local environment or `~/.config/shell/secrets.env`.
+- API keys, recordings, generated responses, app bundles, build outputs, and local settings are excluded from git.
+- Do not commit personal recordings or real API keys.
+
+## Roadmap
+
+- Configurable source language selection for additional Indic languages.
+- Cleaner first-run permission onboarding.
+- Signed release builds with a simple installer flow.
+- Better streaming diagnostics for latency and network failures.
+- Optional post-processing layer for tone, grammar, and formatting.
+- Automated tests for shortcut state, settings, and Sarvam response parsing.
+
+## Contributing
+
+Contributions are welcome. Good first areas are language selection, installation docs, macOS permission UX, latency instrumentation, and tests. See `CONTRIBUTING.md`.
 
 ## Python fallback
 
