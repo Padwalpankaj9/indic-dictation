@@ -2,11 +2,13 @@ import AppKit
 import ApplicationServices
 import AVFoundation
 import CoreGraphics
+import Speech
 
 enum PrivacyPane: String {
     case accessibility = "Privacy_Accessibility"
     case inputMonitoring = "Privacy_ListenEvent"
     case microphone = "Privacy_Microphone"
+    case speechRecognition = "Privacy_SpeechRecognition"
 }
 
 enum PermissionManager {
@@ -26,13 +28,18 @@ enum PermissionManager {
         AXIsProcessTrusted()
     }
 
+    static var speechRecognitionGranted: Bool {
+        SFSpeechRecognizer.authorizationStatus() == .authorized
+    }
+
     static var compactSummary: String {
-        "Mic \(mark(microphoneGranted))  Input \(mark(inputMonitoringGranted))  Paste \(mark(pasteEventsGranted))"
+        "Mic \(mark(microphoneGranted))  Speech \(mark(speechRecognitionGranted))  Input \(mark(inputMonitoringGranted))  Paste \(mark(pasteEventsGranted))"
     }
 
     static var detailedSummary: String {
         [
             "Microphone: \(word(microphoneGranted))",
+            "Speech Recognition: \(word(speechRecognitionGranted))",
             "Input Monitoring: \(word(inputMonitoringGranted))",
             "Accessibility: \(word(accessibilityGranted))",
             "Paste Events: \(word(pasteEventsGranted))"

@@ -29,6 +29,8 @@
   <true/>
   <key>NSMicrophoneUsageDescription</key>
   <string>Indic Dictation records your voice so it can translate speech into English text.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Indic Dictation uses speech recognition to listen locally for the hands-free wake phrase.</string>
   <key>NSSupportsAutomaticGraphicsSwitching</key>
   <true/>
 </dict>
