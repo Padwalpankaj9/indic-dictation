@@ -35,45 +35,60 @@ struct TargetApp {
 }
 
 enum PasteHelper {
-    static func captureFrontmostApp() -> TargetApp? {
+    static func captureFrontmostApp(ignoring ignoredBundleIdentifiers: Set<String> = []) -> TargetApp? {
         guard
             let app = NSWorkspace.shared.frontmostApplication,
             let bundleID = app.bundleIdentifier
         else {
             return nil
         }
+        guard !ignoredBundleIdentifiers.contains(bundleID) else {
+            return nil
+        }
         return TargetApp(name: app.localizedName ?? bundleID, bundleIdentifier: bundleID)
     }
 
-    static func paste(_ text: String, into target: TargetApp?) throws {
+    @MainActor
+    static func paste(_ text: String, into target: TargetApp?) async throws {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
 
+        NSLog("Indic Dictation: paste requested into \(target?.name ?? "current app")")
         let pasteboard = NSPasteboard.general
         let previous = pasteboard.string(forType: .string)
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
-        if let target, let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: target.bundleIdentifier) {
-            NSWorkspace.shared.openApplication(at: appURL, configuration: NSWorkspace.OpenConfiguration())
+        activate(target)
+        try await Task.sleep(nanoseconds: 350_000_000)
+
+        let source = CGEventSource(stateID: .hidSystemState)
+        let vDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true)
+        let vUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
+        vDown?.flags = .maskCommand
+        vUp?.flags = .maskCommand
+        vDown?.post(tap: .cghidEventTap)
+        vUp?.post(tap: .cghidEventTap)
+
+        try await Task.sleep(nanoseconds: 800_000_000)
+        if let previous {
+            pasteboard.clearContents()
+            pasteboard.setString(previous, forType: .string)
+        }
+    }
+
+    @MainActor
+    private static func activate(_ target: TargetApp?) {
+        guard let target else { return }
+
+        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: target.bundleIdentifier).first {
+            app.activate(options: [.activateAllWindows])
+            return
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            let source = CGEventSource(stateID: .hidSystemState)
-            let vDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true)
-            let vUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
-            vDown?.flags = .maskCommand
-            vUp?.flags = .maskCommand
-            vDown?.post(tap: .cghidEventTap)
-            vUp?.post(tap: .cghidEventTap)
-
-            if let previous {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    pasteboard.clearContents()
-                    pasteboard.setString(previous, forType: .string)
-                }
-            }
+        if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: target.bundleIdentifier) {
+            NSWorkspace.shared.openApplication(at: appURL, configuration: NSWorkspace.OpenConfiguration())
         }
     }
 }

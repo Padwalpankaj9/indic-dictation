@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var handsFreeStartedAt: Date?
     private var handsFreeLastVoiceAt: Date?
     private var targetApp: TargetApp?
+    private var lastTargetApp: TargetApp?
     private var latestEnglish = ""
     private var liveEnglish = ""
     private var currentStatus = "Ready"
@@ -40,6 +41,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var handsFreeSilenceTimer: Timer?
     private var debugWindow: NSWindow?
     private var debugTextView: NSTextView?
+    private let ignoredTargetBundleIdentifiers: Set<String> = {
+        var identifiers: Set<String> = [
+            "com.apple.controlcenter",
+            "com.apple.systemuiserver"
+        ]
+        if let bundleIdentifier = Bundle.main.bundleIdentifier {
+            identifiers.insert(bundleIdentifier)
+        }
+        return identifiers
+    }()
     private lazy var shortcutState = ShortcutStateMachine(
         startRecording: { [weak self] locked in self?.startRecording(locked: locked) },
         stopRecording: { [weak self] in self?.stopRecording() },
@@ -174,9 +185,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func pollHotkey() {
+        updateLastTargetApp()
         guard hotkeyEnabled else { return }
         let isPressed = ShortcutPoller.isPressed(selectedShortcut)
         shortcutState.update(isPressed: isPressed, now: Date().timeIntervalSinceReferenceDate)
+    }
+
+    private func updateLastTargetApp() {
+        guard activeRecordingID == nil else { return }
+        guard let app = PasteHelper.captureFrontmostApp(ignoring: ignoredTargetBundleIdentifiers) else { return }
+        lastTargetApp = app
     }
 
     @objc private func toggleHotkey() {
@@ -322,7 +340,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         applySelectedMicrophoneBeforeRecording()
 
-        targetApp = PasteHelper.captureFrontmostApp()
+        let capturedTarget = PasteHelper.captureFrontmostApp(ignoring: ignoredTargetBundleIdentifiers)
+        targetApp = isHandsFreeRecording ? (capturedTarget ?? lastTargetApp) : capturedTarget
+        if let targetApp {
+            lastTargetApp = targetApp
+        }
         latestEnglish = ""
         liveEnglish = ""
         latencyStartedAt = Date()
@@ -336,6 +358,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         indicator.showRecording()
         let mode = locked ? "Locked recording" : "Recording"
         setStatus("\(mode) into \(targetApp?.name ?? "unknown target")")
+        NSLog("Indic Dictation: recording started into \(targetApp?.name ?? "unknown target")")
 
         let buffer = StreamingAudioBuffer()
         buffer.onFirstChunk = { [weak self] in
@@ -461,24 +484,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 let result = await client?.finish() ?? StreamingTranslationResult(text: "", chunkCount: 0)
                 let latency = Date().timeIntervalSince(startedAt)
-                try await MainActor.run {
+                let shouldPaste = await MainActor.run {
                     self.markLatency("stream finalized")
                     self.latestEnglish = result.text
                     self.prepareWarmStreamingClient()
                     guard PermissionManager.pasteEventsGranted else {
+                        NSLog("Indic Dictation: paste permission missing")
                         self.indicator.hide()
                         self.setStatus("Paste permission needed")
                         self.showNotification(title: "Permission needed", body: "Enable Accessibility for Indic Dictation to paste into other apps.")
                         self.finishHandsFreeCycleIfNeeded()
-                        return
+                        return false
                     }
                     guard !result.text.isEmpty else {
+                        NSLog("Indic Dictation: empty final text")
                         self.indicator.hide()
                         self.setStatus("No speech detected")
                         self.finishHandsFreeCycleIfNeeded()
-                        return
+                        return false
                     }
-                    try PasteHelper.paste(result.text, into: targetApp)
+                    return true
+                }
+                guard shouldPaste else { return }
+
+                try await PasteHelper.paste(result.text, into: targetApp)
+                await MainActor.run {
                     self.markLatency("paste complete")
                     self.indicator.hide()
                     self.setStatus("Pasted. \(String(format: "%.1f", latency))s")
@@ -580,6 +610,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleWakeWordDetected() {
         guard handsFreeModeEnabled, activeRecordingID == nil else { return }
         setStatus("Wake phrase heard")
+        indicator.clearPreview()
+        indicator.showRecording()
         isHandsFreeRecording = true
         startRecording(locked: true)
         if activeRecordingID != nil {
