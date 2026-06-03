@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var selectedShortcut = AppSettings.loadShortcut()
     private var selectedMicrophoneUID = AppSettings.loadSelectedMicrophoneUID()
+    private var selectedQualityMode = AppSettings.loadDictationQualityMode()
     private var hotkeyEnabled = true
     private var livePreviewEnabled = AppSettings.loadLivePreviewEnabled()
     private var targetApp: TargetApp?
@@ -44,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let livePreviewMenuItem = NSMenuItem(title: "Show Live Preview", action: #selector(toggleLivePreview), keyEquivalent: "")
     private let shortcutMenu = NSMenu()
     private let microphoneMenu = NSMenu()
+    private let qualityModeMenu = NSMenu()
 
     deinit {
         NSLog("Indic Dictation: AppDelegate deinit")
@@ -102,6 +104,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         microphoneMenu.autoenablesItems = false
         microphoneRoot.submenu = microphoneMenu
         menu.addItem(microphoneRoot)
+
+        let qualityModeRoot = NSMenuItem(title: "Response Mode", action: nil, keyEquivalent: "")
+        qualityModeMenu.autoenablesItems = false
+        for mode in DictationQualityMode.allCases {
+            let item = NSMenuItem(title: "\(mode.name) (\(mode.detail))", action: #selector(selectQualityMode(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.rawValue
+            qualityModeMenu.addItem(item)
+        }
+        qualityModeRoot.submenu = qualityModeMenu
+        menu.addItem(qualityModeRoot)
 
         livePreviewMenuItem.target = self
         livePreviewMenuItem.state = livePreviewEnabled ? .on : .off
@@ -227,6 +240,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateDebugWindow()
     }
 
+    @objc private func selectQualityMode(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let mode = DictationQualityMode(rawValue: rawValue) else {
+            return
+        }
+
+        selectedQualityMode = mode
+        AppSettings.saveDictationQualityMode(mode)
+        warmStreamingClient?.close()
+        warmStreamingClient = nil
+        isPreparingWarmClient = false
+        prepareWarmStreamingClient()
+        setStatus("Mode: \(mode.name)")
+        refreshMenu()
+    }
+
     @objc private func copyLastEnglish() {
         guard !latestEnglish.isEmpty else {
             setStatus("No English yet")
@@ -328,10 +357,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task {
             do {
-                let warmClient = await MainActor.run {
-                    self.takeWarmStreamingClient()
+                let qualityMode = await MainActor.run {
+                    self.selectedQualityMode
                 }
-                let client = warmClient ?? SarvamStreamingClient()
+                let warmClient = await MainActor.run {
+                    self.takeWarmStreamingClient(for: qualityMode)
+                }
+                let client = warmClient ?? SarvamStreamingClient(qualityMode: qualityMode)
 
                 let shouldAttach = await MainActor.run {
                     guard self.activeRecordingID == recordingID else {
@@ -500,13 +532,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func prepareWarmStreamingClient() {
         guard warmStreamingClient == nil, !isPreparingWarmClient else { return }
         isPreparingWarmClient = true
+        let qualityMode = selectedQualityMode
 
         Task {
-            let client = SarvamStreamingClient()
+            let client = SarvamStreamingClient(qualityMode: qualityMode)
             do {
                 try await client.connect()
                 await MainActor.run {
-                    if self.warmStreamingClient == nil {
+                    if self.warmStreamingClient == nil, self.selectedQualityMode == qualityMode {
                         self.warmStreamingClient = client
                     } else {
                         client.close()
@@ -521,8 +554,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func takeWarmStreamingClient() -> SarvamStreamingClient? {
-        guard let client = warmStreamingClient, client.isUsable else {
+    private func takeWarmStreamingClient(for qualityMode: DictationQualityMode) -> SarvamStreamingClient? {
+        guard let client = warmStreamingClient, client.isUsable, client.qualityMode == qualityMode else {
             warmStreamingClient?.close()
             warmStreamingClient = nil
             return nil
@@ -556,6 +589,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         livePreviewMenuItem.state = livePreviewEnabled ? .on : .off
         for item in shortcutMenu.items {
             item.state = item.title == selectedShortcut.name ? .on : .off
+        }
+        for item in qualityModeMenu.items {
+            item.state = item.representedObject as? String == selectedQualityMode.rawValue ? .on : .off
         }
         rebuildMicrophoneMenu()
         updateDebugWindow()
@@ -682,6 +718,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Status: \(currentStatus)
         Hotkey: \(hotkeyEnabled ? "Enabled" : "Disabled")
         Shortcut: \(selectedShortcut.name)
+        Response Mode: \(selectedQualityMode.name)
         Microphone: \(microphoneDebugSummary())
         Target: \(target)
 

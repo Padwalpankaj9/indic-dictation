@@ -23,6 +23,7 @@ Indic Dictation is early but usable. The native macOS app supports low-latency M
 - Supports hold-to-record and double-tap lock recording modes.
 - Lets the shortcut be changed from the menu bar.
 - Lets the microphone input be selected from the menu bar.
+- Includes response modes for latency/accuracy tuning: Fast, Balanced, and Accurate.
 - Shows a small bottom-center floating indicator while recording and processing, with optional live English preview.
 - Includes a debug window for permissions, current shortcut, microphone, target, latency marks, and last English result.
 
@@ -86,6 +87,10 @@ Use the menu bar menu to:
 - Enable or disable the hotkey.
 - Choose the shortcut.
 - Choose the microphone input or refresh connected microphones.
+- Choose the response mode:
+  - Fast: lowest latency for short commands.
+  - Balanced: recommended default for normal dictation.
+  - Accurate: waits longer for more context.
 - Toggle the live preview text.
 - Copy the last English result.
 - Open permission settings.

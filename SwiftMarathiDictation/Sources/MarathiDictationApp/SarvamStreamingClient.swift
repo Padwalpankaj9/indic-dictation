@@ -6,6 +6,8 @@ struct StreamingTranslationResult {
 }
 
 final class SarvamStreamingClient: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
+    let qualityMode: DictationQualityMode
+
     private var task: URLSessionWebSocketTask?
     private var session: URLSession?
     private var chunks: [String] = []
@@ -20,25 +22,15 @@ final class SarvamStreamingClient: NSObject, URLSessionWebSocketDelegate, @unche
         !isClosed && task != nil
     }
 
+    init(qualityMode: DictationQualityMode = .balanced) {
+        self.qualityMode = qualityMode
+        super.init()
+    }
+
     func connect() async throws {
         let apiKey = try SarvamClient.loadAPIKey()
         var components = URLComponents(string: "wss://api.sarvam.ai/speech-to-text/ws")!
-        components.queryItems = [
-            URLQueryItem(name: "language-code", value: "mr-IN"),
-            URLQueryItem(name: "model", value: "saaras:v3"),
-            URLQueryItem(name: "mode", value: "translate"),
-            URLQueryItem(name: "sample_rate", value: "16000"),
-            URLQueryItem(name: "input_audio_codec", value: "pcm_s16le"),
-            URLQueryItem(name: "high_vad_sensitivity", value: "true"),
-            URLQueryItem(name: "min_speech_frames", value: "1"),
-            URLQueryItem(name: "first_turn_min_speech_frames", value: "1"),
-            URLQueryItem(name: "negative_frames_count", value: "2"),
-            URLQueryItem(name: "negative_frames_window", value: "3"),
-            URLQueryItem(name: "pre_speech_pad_frames", value: "2"),
-            URLQueryItem(name: "num_initial_ignored_frames", value: "0"),
-            URLQueryItem(name: "vad_signals", value: "true"),
-            URLQueryItem(name: "flush_signal", value: "true")
-        ]
+        components.queryItems = qualityMode.streamingQueryItems
         guard let url = components.url else {
             throw SarvamClientError.invalidResponse
         }
@@ -54,6 +46,7 @@ final class SarvamStreamingClient: NSObject, URLSessionWebSocketDelegate, @unche
         self.currentText = ""
         task.resume()
         onTiming?("websocket resumed")
+        onTiming?("mode \(qualityMode.name.lowercased())")
         receiveNext()
     }
 
@@ -63,16 +56,17 @@ final class SarvamStreamingClient: NSObject, URLSessionWebSocketDelegate, @unche
             audio: StreamingAudioData(
                 data: data.base64EncodedString(),
                 sampleRate: 16_000,
-                encoding: "audio/wav"
+                encoding: "pcm_s16le"
             )
         )
         send(payload)
     }
 
-    func finish(timeoutSeconds: TimeInterval = 0.35) async -> StreamingTranslationResult {
+    func finish() async -> StreamingTranslationResult {
         if !isClosed {
             let chunkCountAtFlush = chunks.count
-            let waitLimit = cleanedText().isEmpty ? max(timeoutSeconds, 0.75) : timeoutSeconds
+            let timeoutSeconds = qualityMode.flushTimeoutSeconds
+            let waitLimit = cleanedText().isEmpty ? max(timeoutSeconds, 0.95) : timeoutSeconds
             send(StreamingFlushMessage(type: "flush"))
             onTiming?("flush sent")
             let deadline = Date().addingTimeInterval(waitLimit)
