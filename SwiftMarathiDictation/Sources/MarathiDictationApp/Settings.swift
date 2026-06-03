@@ -14,6 +14,9 @@ struct ShortcutPreset: Codable, Equatable {
 }
 
 enum AppSettings {
+    private static let livePreviewKey = "livePreviewEnabled"
+    private static let selectedMicrophoneUIDKey = "selectedMicrophoneUID"
+
     static let presets: [ShortcutPreset] = [
         ShortcutPreset(name: "Command + Option", modifiers: [.command, .option]),
         ShortcutPreset(name: "Command + Shift", modifiers: [.command, .shift]),
@@ -50,6 +53,33 @@ enum AppSettings {
         } catch {
             NSLog("Failed to save shortcut: \(error)")
         }
+    }
+
+    static func loadLivePreviewEnabled() -> Bool {
+        guard UserDefaults.standard.object(forKey: livePreviewKey) != nil else {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: livePreviewKey)
+    }
+
+    static func saveLivePreviewEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: livePreviewKey)
+    }
+
+    static func loadSelectedMicrophoneUID() -> String? {
+        guard let uid = UserDefaults.standard.string(forKey: selectedMicrophoneUIDKey),
+              !uid.isEmpty else {
+            return nil
+        }
+        return uid
+    }
+
+    static func saveSelectedMicrophoneUID(_ uid: String?) {
+        guard let uid, !uid.isEmpty else {
+            UserDefaults.standard.removeObject(forKey: selectedMicrophoneUIDKey)
+            return
+        }
+        UserDefaults.standard.set(uid, forKey: selectedMicrophoneUIDKey)
     }
 }
 

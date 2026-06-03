@@ -54,7 +54,7 @@ if [[ -z "${RESOURCE_BUNDLE:-}" || ! -d "$RESOURCE_BUNDLE" ]]; then
   exit 1
 fi
 
-DIST_DIR="$ROOT/dist"
+DIST_DIR="${MARATHI_DICTATION_DIST_DIR:-${TMPDIR:-/tmp}/marathi-dictation-dist}"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
 CONTENTS="$APP_DIR/Contents"
 
