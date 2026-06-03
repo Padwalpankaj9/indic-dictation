@@ -1,13 +1,21 @@
 # Marathi Dictation
 
-Local Mac dictation app for speaking Marathi and pasting final English text into the active app. It uses Sarvam Saaras v3 through the streaming speech-to-text API.
+Local Mac dictation app for speaking Marathi and inserting final English text into the active app. It uses Sarvam Saaras v3 through the streaming speech-to-text API.
+
+## Why this exists
+
+General-purpose dictation tools are often excellent for English, but they can struggle with local languages and accents, especially Indic languages. The goal of this project is to make a low-latency dictation layer for people who think and speak best in their mother tongue, but need polished English text in their day-to-day apps.
+
+The app is a native macOS wrapper around Sarvam's speech-to-text translation API. You hold a global shortcut, speak naturally in Marathi, release the shortcut, and the app inserts the English translation wherever your cursor is. It is designed to feel like normal dictation, but optimized for Indian-language speech.
+
+The current implementation is Marathi-first. The architecture is intentionally small enough to adapt to other Indic languages supported by Sarvam.
 
 ## What it does
 
 - Runs as a native Swift menu bar app.
 - Streams 16 kHz PCM microphone audio to Sarvam Saaras v3.
 - Translates Marathi speech to English while recording.
-- Automatically pastes the English translation into the target app.
+- Automatically inserts the English translation into the focused app.
 - Supports hold-to-record and double-tap lock recording modes.
 - Lets the shortcut be changed from the menu bar.
 - Lets the microphone input be selected from the menu bar.
