@@ -46,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let microphoneMenu = NSMenu()
 
     deinit {
-        NSLog("Marathi Dictation: AppDelegate deinit")
+        NSLog("Indic Dictation: AppDelegate deinit")
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -59,7 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureStatusItem() {
-        NSLog("Marathi Dictation: configuring status item")
+        NSLog("Indic Dictation: configuring status item")
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.isVisible = true
         if let button = statusItem.button {
@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 button.title = "MD"
             }
-            button.toolTip = "Marathi Dictation"
+            button.toolTip = "Indic Dictation"
         }
 
         let menu = NSMenu()
@@ -128,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(permissionsRoot)
 
         menu.addItem(.separator())
-        let quitItem = NSMenuItem(title: "Quit Marathi Dictation", action: #selector(quit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit Indic Dictation", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
@@ -421,7 +421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     guard PermissionManager.pasteEventsGranted else {
                         self.indicator.hide()
                         self.setStatus("Paste permission needed")
-                        self.showNotification(title: "Permission needed", body: "Enable Accessibility for Marathi Dictation to paste into other apps.")
+                        self.showNotification(title: "Permission needed", body: "Enable Accessibility for Indic Dictation to paste into other apps.")
                         return
                     }
                     guard !result.text.isEmpty else {
@@ -489,7 +489,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             _ = try AudioInputDeviceManager.applySelectedInput(uid: selectedMicrophoneUID)
         } catch {
-            NSLog("Marathi Dictation: selected microphone unavailable: \(error)")
+            NSLog("Indic Dictation: selected microphone unavailable: \(error)")
             showNotification(
                 title: "Microphone unavailable",
                 body: "Using the current system default microphone for this recording."
@@ -653,7 +653,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Marathi Dictation Debug"
+        window.title = "Indic Dictation Debug"
         window.center()
 
         let scrollView = NSScrollView(frame: window.contentView?.bounds ?? .zero)

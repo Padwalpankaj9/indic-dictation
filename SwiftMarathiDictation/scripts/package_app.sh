@@ -2,12 +2,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_NAME="Marathi Dictation"
-EXECUTABLE_NAME="MarathiDictationApp"
-RESOURCE_BUNDLE_NAME="SwiftMarathiDictation_MarathiDictationApp.bundle"
+APP_NAME="Indic Dictation"
+EXECUTABLE_NAME="IndicDictationApp"
+RESOURCE_BUNDLE_NAME="SwiftIndicDictation_MarathiDictationApp.bundle"
 CONFIG="release"
 INSTALL_APP=false
-SIGN_IDENTITY="${MARATHI_DICTATION_SIGN_IDENTITY:-}"
+SIGN_IDENTITY="${INDIC_DICTATION_SIGN_IDENTITY:-${MARATHI_DICTATION_SIGN_IDENTITY:-}}"
 
 clean_bundle_metadata() {
   local bundle_path="$1"
@@ -54,7 +54,7 @@ if [[ -z "${RESOURCE_BUNDLE:-}" || ! -d "$RESOURCE_BUNDLE" ]]; then
   exit 1
 fi
 
-DIST_DIR="${MARATHI_DICTATION_DIST_DIR:-${TMPDIR:-/tmp}/marathi-dictation-dist}"
+DIST_DIR="${INDIC_DICTATION_DIST_DIR:-${MARATHI_DICTATION_DIST_DIR:-${TMPDIR:-/tmp}/indic-dictation-dist}}"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
 CONTENTS="$APP_DIR/Contents"
 

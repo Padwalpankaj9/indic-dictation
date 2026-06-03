@@ -1,6 +1,6 @@
-# Marathi Dictation
+# Indic Dictation
 
-Local Mac dictation app for speaking Marathi and inserting final English text into the active app. It uses Sarvam Saaras v3 through the streaming speech-to-text API.
+Local Mac dictation app for speaking Indic languages and inserting final English text into the active app. It uses Sarvam Saaras v3 through the streaming speech-to-text API.
 
 ## Why this exists
 
@@ -51,7 +51,7 @@ Native Swift menu bar app during development:
 ```bash
 cd SwiftMarathiDictation
 swift build
-.build/debug/MarathiDictationApp
+.build/debug/IndicDictationApp
 ```
 
 Build an installable Mac app:
@@ -64,14 +64,14 @@ cd SwiftMarathiDictation
 The installed app is:
 
 ```bash
-/Applications/Marathi Dictation.app
+/Applications/Indic Dictation.app
 ```
 
 ## UI workflow
 
 Menu bar workflow:
 
-1. Start `/Applications/Marathi Dictation.app`.
+1. Start `/Applications/Indic Dictation.app`.
 2. Click where the English text should appear.
 3. Use either shortcut mode:
    - Hold mode: hold the selected shortcut, speak, then release to translate and paste.
@@ -105,26 +105,26 @@ The menu bar app shows a permission summary and has direct links to the relevant
 The earlier Python MVP is kept for fallback/debugging:
 
 ```bash
-PYTHONPATH=src uv run python -m marathi_dictation.menubar
-PYTHONPATH=src uv run python -m marathi_dictation.gui
+uv run indic-dictation-menubar
+uv run indic-dictation-ui
 ```
 
 Terminal-only MVP:
 
 ```bash
-PYTHONPATH=src uv run python -m marathi_dictation.cli
+uv run indic-dictation
 ```
 
 To copy the English result:
 
 ```bash
-PYTHONPATH=src uv run python -m marathi_dictation.cli --copy
+uv run indic-dictation --copy
 ```
 
 To reprocess an existing audio file:
 
 ```bash
-PYTHONPATH=src uv run python -m marathi_dictation.cli --audio-in samples/example.wav
+uv run indic-dictation --audio-in samples/example.wav
 ```
 
 ## Output
@@ -132,13 +132,13 @@ PYTHONPATH=src uv run python -m marathi_dictation.cli --audio-in samples/example
 Swift recorded audio goes to:
 
 ```bash
-~/Library/Application Support/Marathi Dictation/samples
+~/Library/Application Support/Indic Dictation/samples
 ```
 
 Swift long-recording chunks go to:
 
 ```bash
-~/Library/Application Support/Marathi Dictation/chunks
+~/Library/Application Support/Indic Dictation/chunks
 ```
 
 Python fallback recordings go to `samples/`, and Python Sarvam responses go to `outputs/`.

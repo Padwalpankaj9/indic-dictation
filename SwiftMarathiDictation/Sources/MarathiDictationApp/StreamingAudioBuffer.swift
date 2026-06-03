@@ -1,7 +1,7 @@
 import Foundation
 
 final class StreamingAudioBuffer: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.pankajpadwal.MarathiDictation.StreamingAudioBuffer")
+    private let queue = DispatchQueue(label: "com.pankajpadwal.IndicDictation.StreamingAudioBuffer")
     private var pending: [Data] = []
     private var client: SarvamStreamingClient?
     private var pendingBytes = 0

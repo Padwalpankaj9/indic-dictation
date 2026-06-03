@@ -23,7 +23,7 @@ from marathi_dictation.settings import MODIFIER_KEY_CODES, SHORTCUT_PRESETS, loa
 class DictationApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Marathi Dictation MVP")
+        self.title("Indic Dictation MVP")
         self.geometry("820x520")
         self.minsize(720, 460)
 

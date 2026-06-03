@@ -1,2 +1,1 @@
-"""Marathi dictation MVP."""
-
+"""Indic Dictation Python fallback tools."""

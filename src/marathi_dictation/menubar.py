@@ -25,7 +25,7 @@ from marathi_dictation.settings import MODIFIER_KEY_CODES, SHORTCUT_PRESETS, loa
 ICON_PATH = resource_path("assets", "icons", "menubar-icon-22@2x.png")
 
 
-class MarathiDictationMenuBar(rumps.App):
+class IndicDictationMenuBar(rumps.App):
     def __init__(self) -> None:
         self.selected_shortcut = load_shortcut()
         self.hotkey_enabled = True
@@ -51,12 +51,12 @@ class MarathiDictationMenuBar(rumps.App):
             None,
         ]
         super().__init__(
-            "Marathi Dictation",
+            "Indic Dictation",
             title="",
             icon=str(ICON_PATH),
             template=True,
             menu=menu,
-            quit_button="Quit Marathi Dictation",
+            quit_button="Quit Indic Dictation",
         )
         self.status_item = self.menu["Status: Ready"]
         self.hotkey_item = self.menu["Hotkey Enabled"]
@@ -150,7 +150,7 @@ class MarathiDictationMenuBar(rumps.App):
             self.audio_stream = None
             self.started_at = None
             self._refresh_menu_state(f"Mic error: {exc}")
-            rumps.notification("Marathi Dictation", "Microphone error", str(exc))
+            rumps.notification("Indic Dictation", "Microphone error", str(exc))
             return
 
         mode = "Locked recording" if locked else "Recording"
@@ -214,11 +214,11 @@ class MarathiDictationMenuBar(rumps.App):
         except (SarvamError, PasteError) as exc:
             self.indicator.hide()
             self._refresh_menu_state("Error")
-            rumps.notification("Marathi Dictation", "Dictation error", str(exc))
+            rumps.notification("Indic Dictation", "Dictation error", str(exc))
         except Exception as exc:  # noqa: BLE001
             self.indicator.hide()
             self._refresh_menu_state("Error")
-            rumps.notification("Marathi Dictation", "Unexpected error", str(exc))
+            rumps.notification("Indic Dictation", "Unexpected error", str(exc))
 
     def _audio_callback(self, indata, frames, time_info, status) -> None:  # noqa: ANN001
         self.audio_queue.put(bytes(indata))
@@ -231,7 +231,7 @@ class MarathiDictationMenuBar(rumps.App):
 
 
 def main() -> int:
-    app = MarathiDictationMenuBar()
+    app = IndicDictationMenuBar()
     app.run()
     return 0
 

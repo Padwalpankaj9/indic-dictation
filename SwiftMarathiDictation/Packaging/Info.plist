@@ -4,15 +4,15 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleDisplayName</key>
-  <string>Marathi Dictation</string>
+  <string>Indic Dictation</string>
   <key>CFBundleExecutable</key>
-  <string>MarathiDictationApp</string>
+  <string>IndicDictationApp</string>
   <key>CFBundleIconFile</key>
   <string>AppIcon</string>
   <key>CFBundleIdentifier</key>
   <string>com.pankajpadwal.MarathiDictation</string>
   <key>CFBundleName</key>
-  <string>Marathi Dictation</string>
+  <string>Indic Dictation</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -24,11 +24,11 @@
   <key>LSUIElement</key>
   <true/>
   <key>NSAppleEventsUsageDescription</key>
-  <string>Marathi Dictation activates the target app and pastes translated English text where your cursor is.</string>
+  <string>Indic Dictation activates the target app and pastes translated English text where your cursor is.</string>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Marathi Dictation records your voice so it can translate Marathi speech into English text.</string>
+  <string>Indic Dictation records your voice so it can translate speech into English text.</string>
   <key>NSSupportsAutomaticGraphicsSwitching</key>
   <true/>
 </dict>

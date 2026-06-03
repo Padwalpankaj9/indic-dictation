@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 
-APP_NAME = "Marathi Dictation"
+APP_NAME = "Indic Dictation"
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parents[1]
 RESOURCE_ROOT = Path(os.environ.get("RESOURCEPATH", PROJECT_ROOT))

@@ -27,7 +27,7 @@ SHORTCUT_PRESETS = {
     "Control + Option": ("Control", "Option"),
 }
 DEFAULT_SHORTCUT = "Command + Option"
-SETTINGS_PATH = Path.home() / ".config" / "marathi-dictation" / "settings.json"
+SETTINGS_PATH = Path.home() / ".config" / "indic-dictation" / "settings.json"
 
 
 def load_shortcut() -> str:

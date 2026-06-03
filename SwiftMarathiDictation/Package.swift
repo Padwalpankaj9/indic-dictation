@@ -3,12 +3,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "SwiftMarathiDictation",
+    name: "SwiftIndicDictation",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "MarathiDictationApp", targets: ["MarathiDictationApp"])
+        .executable(name: "IndicDictationApp", targets: ["MarathiDictationApp"])
     ],
     targets: [
         .executableTarget(

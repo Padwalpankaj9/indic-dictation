@@ -116,7 +116,7 @@ def run_once(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Record Marathi speech and translate it to English.")
+    parser = argparse.ArgumentParser(description="Record Indic speech, currently Marathi, and translate it to English.")
     parser.add_argument("--copy", action="store_true", help="Copy the English translation to the clipboard.")
     parser.add_argument("--audio-in", help="Use an existing audio file instead of recording from the microphone.")
     parser.add_argument("--audio-out", help="Path for the recorded WAV file.")

@@ -83,7 +83,7 @@ def translate_to_english(audio_path: Path) -> dict[str, Any]:
     if audio_duration <= MAX_REST_AUDIO_SECONDS:
         return _translate_short_audio(audio_path)
 
-    with tempfile.TemporaryDirectory(prefix="marathi-dictation-chunks-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="indic-dictation-chunks-") as temp_dir:
         chunk_paths = _split_wav(audio_path, Path(temp_dir), MAX_REST_AUDIO_SECONDS)
         chunk_results = [_translate_short_audio(chunk_path) for chunk_path in chunk_paths]
 

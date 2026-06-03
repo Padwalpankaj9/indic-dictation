@@ -1,5 +1,5 @@
 [project]
-name = "marathi-dictation"
+name = "indic-dictation"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
@@ -14,6 +14,9 @@ dependencies = [
 ]
 
 [project.scripts]
+indic-dictation = "marathi_dictation.cli:main"
+indic-dictation-menubar = "marathi_dictation.menubar:main"
+indic-dictation-ui = "marathi_dictation.gui:main"
 marathi-dictation = "marathi_dictation.cli:main"
 marathi-dictation-menubar = "marathi_dictation.menubar:main"
 marathi-dictation-ui = "marathi_dictation.gui:main"

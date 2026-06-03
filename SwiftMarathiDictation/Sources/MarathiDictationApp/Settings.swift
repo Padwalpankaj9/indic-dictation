@@ -29,11 +29,13 @@ enum AppSettings {
 
     static let defaultPreset = presets[0]
     private static let settingsURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".config/indic-dictation-swift/settings.json")
+    private static let legacySettingsURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".config/marathi-dictation-swift/settings.json")
 
     static func loadShortcut() -> ShortcutPreset {
         guard
-            let data = try? Data(contentsOf: settingsURL),
+            let data = try? Data(contentsOf: readableSettingsURL),
             let decoded = try? JSONDecoder().decode(ShortcutPreset.self, from: data),
             let preset = presets.first(where: { $0.name == decoded.name })
         else {
@@ -81,11 +83,21 @@ enum AppSettings {
         }
         UserDefaults.standard.set(uid, forKey: selectedMicrophoneUIDKey)
     }
+
+    private static var readableSettingsURL: URL {
+        if FileManager.default.fileExists(atPath: settingsURL.path) {
+            return settingsURL
+        }
+        if FileManager.default.fileExists(atPath: legacySettingsURL.path) {
+            return legacySettingsURL
+        }
+        return settingsURL
+    }
 }
 
 enum AppPaths {
     static let appSupport = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/Marathi Dictation")
+        .appendingPathComponent("Library/Application Support/Indic Dictation")
 
     static func dataURL(folder: String, fileName: String) throws -> URL {
         let folderURL = appSupport.appendingPathComponent(folder)
