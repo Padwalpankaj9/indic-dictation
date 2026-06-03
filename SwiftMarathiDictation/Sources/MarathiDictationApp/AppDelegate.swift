@@ -9,10 +9,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyEnabled = true
     private var targetApp: TargetApp?
     private var latestEnglish = ""
+    private var liveEnglish = ""
     private var currentStatus = "Ready"
 
     private let recorder = AudioRecorder()
     private let indicator = VoiceIndicator()
+    private var audioStreamer: LiveAudioStreamer?
+    private var audioBuffer: StreamingAudioBuffer?
+    private var streamingClient: SarvamStreamingClient?
+    private var warmStreamingClient: SarvamStreamingClient?
+    private var isPreparingWarmClient = false
+    private var recordingStartedAt: Date?
+    private var activeRecordingID: UUID?
+    private var didMarkFirstServerEvent = false
+    private var didMarkFirstText = false
+    private var latencyStartedAt: Date?
+    private var latencyMarks: [String] = []
     private var pollTimer: Timer?
     private var debugWindow: NSWindow?
     private var debugTextView: NSTextView?
@@ -37,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         requestNotificationPermission()
         checkPermissions()
         startPolling()
+        prepareWarmStreamingClient()
     }
 
     private func configureStatusItem() {
@@ -197,49 +210,250 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         targetApp = PasteHelper.captureFrontmostApp()
+        latestEnglish = ""
+        liveEnglish = ""
+        latencyStartedAt = Date()
+        latencyMarks = []
+        didMarkFirstServerEvent = false
+        didMarkFirstText = false
+        let recordingID = UUID()
+        activeRecordingID = recordingID
+        markLatency("hotkey down")
+        indicator.clearPreview()
+        indicator.showRecording()
+        let mode = locked ? "Locked recording" : "Recording"
+        setStatus("\(mode) into \(targetApp?.name ?? "unknown target")")
+
+        let buffer = StreamingAudioBuffer()
+        buffer.onFirstChunk = { [weak self] in
+            Task { @MainActor in
+                self?.markLatency("first mic chunk")
+            }
+        }
+        buffer.onFirstSend = { [weak self] in
+            Task { @MainActor in
+                self?.markLatency("first audio sent")
+            }
+        }
+        audioBuffer = buffer
+
         do {
-            try recorder.start()
-            indicator.showRecording()
-            let mode = locked ? "Locked recording" : "Recording"
-            setStatus("\(mode) into \(targetApp?.name ?? "unknown target")")
+            let streamer = LiveAudioStreamer(meter: indicator.meter) { data in
+                buffer.append(data)
+            }
+            try streamer.start()
+            audioStreamer = streamer
+            recordingStartedAt = Date()
+            markLatency("mic started")
         } catch {
+            activeRecordingID = nil
+            audioBuffer = nil
+            indicator.hide()
             setStatus("Mic error")
             showNotification(title: "Microphone error", body: error.localizedDescription)
+            return
+        }
+
+        Task {
+            do {
+                let warmClient = await MainActor.run {
+                    self.takeWarmStreamingClient()
+                }
+                let client = warmClient ?? SarvamStreamingClient()
+
+                let shouldAttach = await MainActor.run {
+                    guard self.activeRecordingID == recordingID else {
+                        return false
+                    }
+                    self.configureStreamingClient(client)
+                    self.streamingClient = client
+                    self.markLatency(warmClient == nil ? "websocket connecting" : "warm websocket used")
+                    return true
+                }
+                guard shouldAttach else {
+                    client.close()
+                    return
+                }
+
+                if warmClient == nil || !client.isUsable {
+                    try await client.connect()
+                    await MainActor.run {
+                        self.markLatency("websocket ready")
+                    }
+                }
+
+                let stillRecording = await MainActor.run {
+                    self.activeRecordingID == recordingID
+                }
+                guard stillRecording else {
+                    client.close()
+                    return
+                }
+
+                buffer.attach(client)
+                await MainActor.run {
+                    self.setStatus("Listening...")
+                }
+            } catch {
+                await MainActor.run {
+                    self.audioStreamer?.stop()
+                    self.audioStreamer = nil
+                    self.audioBuffer?.clear()
+                    self.audioBuffer = nil
+                    self.streamingClient = nil
+                    self.activeRecordingID = nil
+                    self.indicator.hide()
+                    self.setStatus("Streaming error")
+                    self.showNotification(title: "Streaming error", body: error.localizedDescription)
+                }
+            }
         }
     }
 
     private func stopRecording() {
-        guard let result = recorder.stop() else { return }
+        let streamer = audioStreamer
+        let buffer = audioBuffer
+        let client = streamingClient
         let targetApp = self.targetApp
+        let startedAt = recordingStartedAt ?? Date()
+
+        markLatency("hotkey released")
+        audioStreamer = nil
+        audioBuffer = nil
+        streamingClient = nil
+        recordingStartedAt = nil
+        activeRecordingID = nil
+
+        streamer?.stop()
         indicator.showProcessing()
-        setStatus("Translating...")
+        setStatus("Finalizing...")
 
         Task {
+            defer {
+                buffer?.clear()
+            }
             do {
-                let started = Date()
-                let sarvamClient = SarvamClient()
-                let translation = try await sarvamClient.translate(audioURL: result.url)
-                let latency = Date().timeIntervalSince(started)
+                await MainActor.run {
+                    self.markLatency("flush start")
+                }
+                await buffer?.drain()
+                await MainActor.run {
+                    self.markLatency("audio drained")
+                }
+                let result = await client?.finish() ?? StreamingTranslationResult(text: "", chunkCount: 0)
+                let latency = Date().timeIntervalSince(startedAt)
                 try await MainActor.run {
-                    self.latestEnglish = translation.transcript
+                    self.markLatency("stream finalized")
+                    self.latestEnglish = result.text
+                    self.prepareWarmStreamingClient()
                     guard PermissionManager.pasteEventsGranted else {
                         self.indicator.hide()
                         self.setStatus("Paste permission needed")
                         self.showNotification(title: "Permission needed", body: "Enable Accessibility for Marathi Dictation to paste into other apps.")
                         return
                     }
-                    try PasteHelper.paste(translation.transcript, into: targetApp)
+                    guard !result.text.isEmpty else {
+                        self.indicator.hide()
+                        self.setStatus("No speech detected")
+                        return
+                    }
+                    try PasteHelper.paste(result.text, into: targetApp)
+                    self.markLatency("paste complete")
                     self.indicator.hide()
                     self.setStatus("Pasted. \(String(format: "%.1f", latency))s")
                 }
             } catch {
                 await MainActor.run {
+                    self.prepareWarmStreamingClient()
                     self.indicator.hide()
                     self.setStatus("Error")
                     self.showNotification(title: "Dictation error", body: error.localizedDescription)
                 }
             }
         }
+    }
+
+    private func configureStreamingClient(_ client: SarvamStreamingClient) {
+        client.onText = { [weak self] text in
+            Task { @MainActor in
+                guard let self else { return }
+                if !self.didMarkFirstText {
+                    self.didMarkFirstText = true
+                    self.markLatency("first English text")
+                }
+                self.liveEnglish = text
+                self.indicator.setPreview(text)
+                if self.currentStatus != "Listening..." {
+                    self.setStatus("Listening...")
+                } else {
+                    self.updateDebugWindow()
+                }
+            }
+        }
+        client.onEvent = { [weak self] event in
+            Task { @MainActor in
+                guard let self else { return }
+                if !self.didMarkFirstServerEvent {
+                    self.didMarkFirstServerEvent = true
+                    self.markLatency("first server event")
+                }
+                if event == "START_SPEECH" {
+                    self.indicator.showRecording()
+                }
+            }
+        }
+        client.onTiming = { [weak self] label in
+            Task { @MainActor in
+                self?.markLatency(label)
+            }
+        }
+    }
+
+    private func prepareWarmStreamingClient() {
+        guard warmStreamingClient == nil, !isPreparingWarmClient else { return }
+        isPreparingWarmClient = true
+
+        Task {
+            let client = SarvamStreamingClient()
+            do {
+                try await client.connect()
+                await MainActor.run {
+                    if self.warmStreamingClient == nil {
+                        self.warmStreamingClient = client
+                    } else {
+                        client.close()
+                    }
+                    self.isPreparingWarmClient = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.isPreparingWarmClient = false
+                }
+            }
+        }
+    }
+
+    private func takeWarmStreamingClient() -> SarvamStreamingClient? {
+        guard let client = warmStreamingClient, client.isUsable else {
+            warmStreamingClient?.close()
+            warmStreamingClient = nil
+            return nil
+        }
+        warmStreamingClient = nil
+        return client
+    }
+
+    private func markLatency(_ label: String) {
+        let now = Date()
+        if latencyStartedAt == nil {
+            latencyStartedAt = now
+        }
+        let elapsed = now.timeIntervalSince(latencyStartedAt ?? now)
+        latencyMarks.append(String(format: "%6.3fs  %@", elapsed, label))
+        if latencyMarks.count > 24 {
+            latencyMarks.removeFirst(latencyMarks.count - 24)
+        }
+        updateDebugWindow()
     }
 
     private func setStatus(_ status: String) {
@@ -286,7 +500,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateDebugWindow() {
         guard let debugTextView else { return }
         let latest = latestEnglish.isEmpty ? "(none)" : latestEnglish
+        let live = liveEnglish.isEmpty ? "(none)" : liveEnglish
         let target = targetApp?.name ?? "(none)"
+        let latency = latencyMarks.isEmpty ? "(none)" : latencyMarks.joined(separator: "\n")
         debugTextView.string = """
         Status: \(currentStatus)
         Hotkey: \(hotkeyEnabled ? "Enabled" : "Disabled")
@@ -296,8 +512,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Permissions:
         \(PermissionManager.detailedSummary)
 
+        Live English:
+        \(live)
+
         Last English:
         \(latest)
+
+        Latency:
+        \(latency)
         """
     }
 

@@ -5,6 +5,7 @@ enum ModifierName: String, CaseIterable, Codable {
     case option = "Option"
     case shift = "Shift"
     case control = "Control"
+    case function = "Function"
 }
 
 struct ShortcutPreset: Codable, Equatable {
@@ -18,7 +19,9 @@ enum AppSettings {
         ShortcutPreset(name: "Command + Shift", modifiers: [.command, .shift]),
         ShortcutPreset(name: "Option + Shift", modifiers: [.option, .shift]),
         ShortcutPreset(name: "Command + Control", modifiers: [.command, .control]),
-        ShortcutPreset(name: "Control + Option", modifiers: [.control, .option])
+        ShortcutPreset(name: "Control + Option", modifiers: [.control, .option]),
+        ShortcutPreset(name: "Function", modifiers: [.function]),
+        ShortcutPreset(name: "Function + Option", modifiers: [.function, .option])
     ]
 
     static let defaultPreset = presets[0]

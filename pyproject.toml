@@ -10,6 +10,7 @@ dependencies = [
     "rumps>=0.4.0",
     "setuptools<82",
     "sounddevice>=0.5.1",
+    "sarvamai>=0.1.28",
 ]
 
 [project.scripts]

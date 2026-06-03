@@ -7,6 +7,14 @@ EXECUTABLE_NAME="MarathiDictationApp"
 RESOURCE_BUNDLE_NAME="SwiftMarathiDictation_MarathiDictationApp.bundle"
 CONFIG="release"
 INSTALL_APP=false
+SIGN_IDENTITY="${MARATHI_DICTATION_SIGN_IDENTITY:-}"
+
+clean_bundle_metadata() {
+  local bundle_path="$1"
+  xattr -cr "$bundle_path" 2>/dev/null || true
+  find "$bundle_path" -exec xattr -d com.apple.FinderInfo {} \; 2>/dev/null || true
+  find "$bundle_path" -exec xattr -d 'com.apple.fileprovider.fpfs#P' {} \; 2>/dev/null || true
+}
 
 for arg in "$@"; do
   case "$arg" in
@@ -60,7 +68,19 @@ cp "$ROOT/Sources/MarathiDictationApp/Resources/Icons/AppIcon.icns" "$CONTENTS/R
 
 chmod 755 "$CONTENTS/MacOS/$EXECUTABLE_NAME"
 plutil -lint "$CONTENTS/Info.plist" >/dev/null
-codesign --force --deep --sign - "$APP_DIR" >/dev/null
+clean_bundle_metadata "$APP_DIR"
+
+if [[ -z "$SIGN_IDENTITY" ]]; then
+  SIGN_IDENTITY="$(security find-identity -v -p codesigning | awk -F '"' '/Apple Development: padwalpankaj9@gmail.com/ { print $2; exit }')"
+fi
+
+if [[ -z "$SIGN_IDENTITY" ]]; then
+  echo "No stable code signing identity found. Falling back to ad-hoc signing." >&2
+  SIGN_IDENTITY="-"
+fi
+
+codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR" >/dev/null
+clean_bundle_metadata "$APP_DIR"
 codesign --verify --deep --strict "$APP_DIR"
 
 echo "$APP_DIR"
@@ -68,6 +88,8 @@ echo "$APP_DIR"
 if [[ "$INSTALL_APP" == true ]]; then
   INSTALLED_APP="/Applications/$APP_NAME.app"
   rm -rf "$INSTALLED_APP"
-  ditto "$APP_DIR" "$INSTALLED_APP"
+  ditto --noextattr --norsrc "$APP_DIR" "$INSTALLED_APP"
+  clean_bundle_metadata "$INSTALLED_APP"
+  codesign --verify --deep --strict "$INSTALLED_APP"
   echo "$INSTALLED_APP"
 fi

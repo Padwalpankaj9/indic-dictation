@@ -50,7 +50,7 @@ final class SarvamClient {
     }
 
     private func translateShortAudio(_ audioURL: URL) async throws -> SarvamTranslation {
-        let apiKey = try loadAPIKey()
+        let apiKey = try Self.loadAPIKey()
         let boundary = "Boundary-\(UUID().uuidString)"
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -90,7 +90,7 @@ final class SarvamClient {
         body.append("\(value)\r\n".data(using: .utf8)!)
     }
 
-    private func loadAPIKey() throws -> String {
+    static func loadAPIKey() throws -> String {
         if let key = ProcessInfo.processInfo.environment["SARVAM_API_KEY"], !key.isEmpty {
             return key
         }

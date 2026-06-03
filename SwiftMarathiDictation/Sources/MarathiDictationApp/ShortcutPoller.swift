@@ -19,6 +19,8 @@ enum ShortcutPoller {
             return isKeyDown(kVK_Shift) || isKeyDown(kVK_RightShift)
         case .control:
             return isKeyDown(kVK_Control) || isKeyDown(kVK_RightControl)
+        case .function:
+            return isKeyDown(kVK_Function) || CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn)
         }
     }
 
