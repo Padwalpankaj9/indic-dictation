@@ -56,7 +56,8 @@ final class SarvamStreamingClient: NSObject, URLSessionWebSocketDelegate, @unche
             audio: StreamingAudioData(
                 data: data.base64EncodedString(),
                 sampleRate: 16_000,
-                encoding: "pcm_s16le"
+                // Sarvam's message schema expects this literal even when the connection codec is raw PCM.
+                encoding: "audio/wav"
             )
         )
         send(payload)
