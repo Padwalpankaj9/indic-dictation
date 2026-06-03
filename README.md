@@ -21,7 +21,6 @@ Indic Dictation is early but usable. The native macOS app supports low-latency M
 - Translates Marathi speech to English while recording.
 - Automatically inserts the English translation into the focused app.
 - Supports hold-to-record and double-tap lock recording modes.
-- Includes an experimental hands-free mode that listens for "Hey Indic" and stops after a natural pause.
 - Lets the shortcut be changed from the menu bar.
 - Lets the microphone input be selected from the menu bar.
 - Uses accuracy-first streaming defaults that still feel fast in normal use.
@@ -86,7 +85,6 @@ Menu bar workflow:
 Use the menu bar menu to:
 
 - Enable or disable the hotkey.
-- Enable or disable hands-free mode.
 - Choose the shortcut.
 - Choose the microphone input or refresh connected microphones.
 - Toggle the live preview text.
@@ -95,15 +93,6 @@ Use the menu bar menu to:
 - Open the debug window.
 
 The bottom-center indicator shows animated voice bars while recording and a spinner while translating.
-
-Experimental hands-free workflow:
-
-1. Turn on `Hands-free Mode` from the menu bar.
-2. Click where the English text should appear.
-3. Say `Hey Indic`.
-4. Speak naturally in Marathi.
-5. Pause for about 1.5 seconds.
-6. The app finalizes and inserts the English text into the app that had focus when the wake phrase was detected.
 
 ## macOS permissions
 

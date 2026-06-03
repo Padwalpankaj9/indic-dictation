@@ -85,7 +85,6 @@ enum DictationQualityMode: String, CaseIterable, Codable, Equatable {
 
 enum AppSettings {
     private static let livePreviewKey = "livePreviewEnabled"
-    private static let handsFreeModeKey = "handsFreeModeEnabled"
     private static let selectedMicrophoneUIDKey = "selectedMicrophoneUID"
 
     static let presets: [ShortcutPreset] = [
@@ -137,14 +136,6 @@ enum AppSettings {
 
     static func saveLivePreviewEnabled(_ enabled: Bool) {
         UserDefaults.standard.set(enabled, forKey: livePreviewKey)
-    }
-
-    static func loadHandsFreeModeEnabled() -> Bool {
-        UserDefaults.standard.bool(forKey: handsFreeModeKey)
-    }
-
-    static func saveHandsFreeModeEnabled(_ enabled: Bool) {
-        UserDefaults.standard.set(enabled, forKey: handsFreeModeKey)
     }
 
     static func loadSelectedMicrophoneUID() -> String? {
