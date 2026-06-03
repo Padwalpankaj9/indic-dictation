@@ -1,0 +1,25 @@
+[project]
+name = "marathi-dictation"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "pyperclip>=1.9.0",
+    "pyobjc-framework-Quartz>=12.0",
+    "py2app>=0.28.8",
+    "requests>=2.32.0",
+    "rumps>=0.4.0",
+    "setuptools<82",
+    "sounddevice>=0.5.1",
+]
+
+[project.scripts]
+marathi-dictation = "marathi_dictation.cli:main"
+marathi-dictation-menubar = "marathi_dictation.menubar:main"
+marathi-dictation-ui = "marathi_dictation.gui:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/marathi_dictation"]
