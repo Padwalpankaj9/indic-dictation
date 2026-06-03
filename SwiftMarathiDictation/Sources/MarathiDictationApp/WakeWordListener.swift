@@ -36,7 +36,10 @@ final class WakeWordListener {
         audioEngine?.isRunning == true
     }
 
-    func start(onWake: @escaping @MainActor @Sendable () -> Void) async throws {
+    func start(
+        onWakeDetected: @escaping @MainActor @Sendable () -> Void,
+        onWake: @escaping @MainActor @Sendable () -> Void
+    ) async throws {
         stop()
 
         guard await Self.requestSpeechPermission() else {
@@ -66,7 +69,11 @@ final class WakeWordListener {
             Task { @MainActor in
                 guard let self else { return }
                 if let transcript {
-                    self.handle(transcript: transcript, onWake: onWake)
+                    self.handle(
+                        transcript: transcript,
+                        onWakeDetected: onWakeDetected,
+                        onWake: onWake
+                    )
                 }
                 if error != nil {
                     self.stop()
@@ -104,12 +111,17 @@ final class WakeWordListener {
         task?.cancel()
     }
 
-    private func handle(transcript: String, onWake: @escaping @MainActor @Sendable () -> Void) {
+    private func handle(
+        transcript: String,
+        onWakeDetected: @escaping @MainActor @Sendable () -> Void,
+        onWake: @escaping @MainActor @Sendable () -> Void
+    ) {
         guard !didWake else { return }
         let normalized = Self.normalize(transcript)
         guard phrases.contains(where: { normalized.contains($0) }) else { return }
 
         didWake = true
+        onWakeDetected()
         stop()
         onWake()
     }

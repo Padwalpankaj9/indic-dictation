@@ -194,7 +194,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateLastTargetApp() {
         guard activeRecordingID == nil else { return }
         guard let app = PasteHelper.captureFrontmostApp(ignoring: ignoredTargetBundleIdentifiers) else { return }
-        lastTargetApp = app
+        lastTargetApp = preferredTarget(captured: app)
+    }
+
+    private func preferredTarget(captured: TargetApp?) -> TargetApp? {
+        guard let captured else {
+            return lastTargetApp
+        }
+
+        if captured.hasFocusedElement {
+            return captured
+        }
+
+        if let lastTargetApp,
+           lastTargetApp.bundleIdentifier == captured.bundleIdentifier,
+           lastTargetApp.hasFocusedElement {
+            return lastTargetApp
+        }
+
+        return captured
     }
 
     @objc private func toggleHotkey() {
@@ -341,7 +359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applySelectedMicrophoneBeforeRecording()
 
         let capturedTarget = PasteHelper.captureFrontmostApp(ignoring: ignoredTargetBundleIdentifiers)
-        targetApp = isHandsFreeRecording ? (capturedTarget ?? lastTargetApp) : capturedTarget
+        targetApp = isHandsFreeRecording ? preferredTarget(captured: capturedTarget) : capturedTarget
         if let targetApp {
             lastTargetApp = targetApp
         }
@@ -583,9 +601,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applySelectedMicrophoneBeforeRecording()
         Task {
             do {
-                try await wakeWordListener.start { [weak self] in
-                    self?.handleWakeWordDetected()
-                }
+                try await wakeWordListener.start(
+                    onWakeDetected: { [weak self] in
+                        self?.showWakeFeedback()
+                    },
+                    onWake: { [weak self] in
+                        self?.handleWakeWordDetected()
+                    }
+                )
                 await MainActor.run {
                     if self.currentStatus == "Ready" || self.currentStatus == "Hands-free off" {
                         self.setStatus("Hands-free ready")
@@ -607,11 +630,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wakeWordListener.stop()
     }
 
-    private func handleWakeWordDetected() {
+    private func showWakeFeedback() {
         guard handsFreeModeEnabled, activeRecordingID == nil else { return }
         setStatus("Wake phrase heard")
         indicator.clearPreview()
         indicator.showRecording()
+        NSLog("Indic Dictation: wake phrase detected")
+    }
+
+    private func handleWakeWordDetected() {
+        guard handsFreeModeEnabled, activeRecordingID == nil else { return }
+        showWakeFeedback()
         isHandsFreeRecording = true
         startRecording(locked: true)
         if activeRecordingID != nil {
