@@ -75,10 +75,9 @@ final class WakeWordListener {
         }
         recognitionTask = recognizer.recognitionTask(with: request, resultHandler: resultHandler)
 
+        let tapBlock = Self.makeTapBlock(for: request)
         inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1_600, format: inputFormat) { buffer, _ in
-            request.append(buffer)
-        }
+        inputNode.installTap(onBus: 0, bufferSize: 1_600, format: inputFormat, block: tapBlock)
 
         engine.prepare()
         do {
@@ -121,6 +120,14 @@ final class WakeWordListener {
                 continuation.resume(returning: status == .authorized)
             }
             SFSpeechRecognizer.requestAuthorization(handler)
+        }
+    }
+
+    nonisolated private static func makeTapBlock(
+        for request: SFSpeechAudioBufferRecognitionRequest
+    ) -> AVAudioNodeTapBlock {
+        { buffer, _ in
+            request.append(buffer)
         }
     }
 
