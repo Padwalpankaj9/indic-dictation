@@ -36,10 +36,10 @@ final class WakeWordListener {
         audioEngine?.isRunning == true
     }
 
-    func start(onWake: @escaping @MainActor () -> Void) async throws {
+    func start(onWake: @escaping @MainActor @Sendable () -> Void) async throws {
         stop()
 
-        guard await requestSpeechPermission() else {
+        guard await Self.requestSpeechPermission() else {
             throw WakeWordListenerError.speechPermissionDenied
         }
         guard let recognizer, recognizer.isAvailable else {
@@ -58,55 +58,69 @@ final class WakeWordListener {
         request.taskHint = .search
 
         didWake = false
-        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
-            if let result {
-                self.handle(transcript: result.bestTranscription.formattedString, onWake: onWake)
-            }
-            if error != nil {
-                self.stop()
+        audioEngine = engine
+        recognitionRequest = request
+
+        let resultHandler: @Sendable (SFSpeechRecognitionResult?, Error?) -> Void = { [weak self] result, error in
+            let transcript = result?.bestTranscription.formattedString
+            Task { @MainActor in
+                guard let self else { return }
+                if let transcript {
+                    self.handle(transcript: transcript, onWake: onWake)
+                }
+                if error != nil {
+                    self.stop()
+                }
             }
         }
+        recognitionTask = recognizer.recognitionTask(with: request, resultHandler: resultHandler)
 
         inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1_600, format: inputFormat) { buffer, _ in
             request.append(buffer)
         }
 
-        audioEngine = engine
-        recognitionRequest = request
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            stop()
+            throw error
+        }
     }
 
     func stop() {
-        recognitionTask?.cancel()
+        let task = recognitionTask
+        let request = recognitionRequest
+        let engine = audioEngine
+
         recognitionTask = nil
-        recognitionRequest?.endAudio()
         recognitionRequest = nil
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
         audioEngine = nil
         didWake = false
+
+        engine?.inputNode.removeTap(onBus: 0)
+        engine?.stop()
+        request?.endAudio()
+        task?.cancel()
     }
 
-    private func handle(transcript: String, onWake: @escaping @MainActor () -> Void) {
+    private func handle(transcript: String, onWake: @escaping @MainActor @Sendable () -> Void) {
         guard !didWake else { return }
         let normalized = Self.normalize(transcript)
         guard phrases.contains(where: { normalized.contains($0) }) else { return }
 
         didWake = true
         stop()
-        Task { @MainActor in
-            onWake()
-        }
+        onWake()
     }
 
-    private func requestSpeechPermission() async -> Bool {
+    nonisolated private static func requestSpeechPermission() async -> Bool {
         await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
+            let handler: @Sendable (SFSpeechRecognizerAuthorizationStatus) -> Void = { status in
                 continuation.resume(returning: status == .authorized)
             }
+            SFSpeechRecognizer.requestAuthorization(handler)
         }
     }
 

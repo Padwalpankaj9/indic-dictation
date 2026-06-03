@@ -70,6 +70,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        stopWakeWordListener()
+        stopHandsFreeSilenceMonitor()
+        pollTimer?.invalidate()
+    }
+
     private func configureStatusItem() {
         NSLog("Indic Dictation: configuring status item")
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
