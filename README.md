@@ -1,26 +1,34 @@
 # Marathi Dictation
 
-Local Mac dictation app for speaking Marathi and pasting final English text into the active app. It uses Sarvam Saaras v3 through the REST speech-to-text API.
+Local Mac dictation app for speaking Marathi and pasting final English text into the active app. It uses Sarvam Saaras v3 through the streaming speech-to-text API.
 
 ## What it does
 
 - Runs as a native Swift menu bar app.
-- Records a 16 kHz WAV file from the Mac microphone.
-- Sends the audio to Sarvam for English translation.
-- Splits longer recordings into smaller Sarvam requests and combines the English result.
+- Streams 16 kHz PCM microphone audio to Sarvam Saaras v3.
+- Translates Marathi speech to English while recording.
 - Automatically pastes the English translation into the target app.
 - Supports hold-to-record and double-tap lock recording modes.
 - Lets the shortcut be changed from the menu bar.
-- Shows a small bottom-center floating indicator while recording and processing.
-- Includes a debug window for permissions, current shortcut, target, and last English result.
+- Lets the microphone input be selected from the menu bar.
+- Shows a small bottom-center floating indicator while recording and processing, with optional live English preview.
+- Includes a debug window for permissions, current shortcut, microphone, target, latency marks, and last English result.
 
 ## Setup
 
-The app expects `SARVAM_API_KEY` to be available in the shell environment or in:
+The app expects `SARVAM_API_KEY` to be available in the shell environment or in this local file:
 
 ```bash
 ~/.config/shell/secrets.env
 ```
+
+Example:
+
+```bash
+export SARVAM_API_KEY="your_key_here"
+```
+
+Do not commit real API keys. `.env`, `.env.*`, key files, app bundles, build folders, recordings, and generated outputs are ignored by git.
 
 Python MVP dependencies are still available for fallback testing:
 
@@ -61,7 +69,16 @@ Menu bar workflow:
    - Hold mode: hold the selected shortcut, speak, then release to translate and paste.
    - Lock mode: quickly tap the selected shortcut twice, speak hands-free, then tap once to translate and paste.
 
-Use the menu bar menu to enable/disable the hotkey, choose a shortcut, copy the last English result, open permission settings, or open the debug window.
+Use the menu bar menu to:
+
+- Enable or disable the hotkey.
+- Choose the shortcut.
+- Choose the microphone input or refresh connected microphones.
+- Toggle the live preview text.
+- Copy the last English result.
+- Open permission settings.
+- Open the debug window.
+
 The bottom-center indicator shows animated voice bars while recording and a spinner while translating.
 
 ## macOS permissions
@@ -119,3 +136,7 @@ Swift long-recording chunks go to:
 Python fallback recordings go to `samples/`, and Python Sarvam responses go to `outputs/`.
 
 Local recordings, generated outputs, app bundles, build folders, virtualenvs, IDE state, and secret files are ignored by git.
+
+## License
+
+MIT. See `LICENSE`.
