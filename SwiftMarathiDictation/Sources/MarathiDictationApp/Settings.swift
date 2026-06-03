@@ -86,7 +86,6 @@ enum DictationQualityMode: String, CaseIterable, Codable, Equatable {
 enum AppSettings {
     private static let livePreviewKey = "livePreviewEnabled"
     private static let selectedMicrophoneUIDKey = "selectedMicrophoneUID"
-    private static let dictationQualityModeKey = "dictationQualityMode"
 
     static let presets: [ShortcutPreset] = [
         ShortcutPreset(name: "Command + Option", modifiers: [.command, .option]),
@@ -153,18 +152,6 @@ enum AppSettings {
             return
         }
         UserDefaults.standard.set(uid, forKey: selectedMicrophoneUIDKey)
-    }
-
-    static func loadDictationQualityMode() -> DictationQualityMode {
-        guard let rawValue = UserDefaults.standard.string(forKey: dictationQualityModeKey),
-              let mode = DictationQualityMode(rawValue: rawValue) else {
-            return .accurate
-        }
-        return mode
-    }
-
-    static func saveDictationQualityMode(_ mode: DictationQualityMode) {
-        UserDefaults.standard.set(mode.rawValue, forKey: dictationQualityModeKey)
     }
 
     private static var readableSettingsURL: URL {
