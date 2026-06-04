@@ -22,6 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastFocusedTarget: FocusedTargetInfo?
     private var lastPasteResult: PasteResult?
     private var wakeWordStatus = WakeWordResources.setupStatus()
+    private var latestWakeConfidence: Float?
+    private var latestWakeStreak = 0
+    private var lastWakeTriggerSamples: [Int16]?
     private var latestEnglish = ""
     private var liveEnglish = ""
     private var currentStatus = "Ready"
@@ -67,6 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let livePreviewMenuItem = NSMenuItem(title: "Show Live Preview", action: #selector(toggleLivePreview), keyEquivalent: "")
     private let handsFreeMenuItem = NSMenuItem(title: "Hands-free Mode", action: #selector(toggleHandsFreeMode), keyEquivalent: "")
     private let wakeWordListenerMenuItem = NSMenuItem(title: "Listener: Stopped", action: nil, keyEquivalent: "")
+    private let wakeWordConfidenceMenuItem = NSMenuItem(title: "Confidence: --", action: nil, keyEquivalent: "")
+    private let markFalseWakeMenuItem = NSMenuItem(title: "Mark Last Wake as False Trigger", action: #selector(markLastWakeAsFalseTrigger), keyEquivalent: "")
     private let wakeWordStatusMenuItem = NSMenuItem(title: "Check Wake Word Setup", action: #selector(checkWakeWordSetup), keyEquivalent: "")
     private let wakeWordSampleCountsMenuItem = NSMenuItem(title: "Samples: Wake 0  Other 0", action: nil, keyEquivalent: "")
     private let shortcutMenu = NSMenu()
@@ -158,6 +163,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wakeWordMenu.addItem(handsFreeMenuItem)
         wakeWordListenerMenuItem.isEnabled = false
         wakeWordMenu.addItem(wakeWordListenerMenuItem)
+        wakeWordConfidenceMenuItem.isEnabled = false
+        wakeWordMenu.addItem(wakeWordConfidenceMenuItem)
+        markFalseWakeMenuItem.target = self
+        wakeWordMenu.addItem(markFalseWakeMenuItem)
         wakeWordMenu.addItem(.separator())
         wakeWordStatusMenuItem.target = self
         wakeWordMenu.addItem(wakeWordStatusMenuItem)
@@ -407,6 +416,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             setStatus("Could not open folder")
             showNotification(title: "Training folder error", body: error.localizedDescription)
+        }
+        refreshMenu()
+    }
+
+    @objc private func markLastWakeAsFalseTrigger() {
+        guard let samples = lastWakeTriggerSamples else {
+            setStatus("No wake sample to mark")
+            return
+        }
+
+        do {
+            let url = try WakeWordTrainingResources.saveSamples(samples, kind: .negative)
+            lastWakeTriggerSamples = nil
+            setStatus("False wake saved")
+            showNotification(
+                title: "False wake saved",
+                body: "\(url.lastPathComponent) saved. Retrain wake word to apply it."
+            )
+        } catch {
+            setStatus("False wake save failed")
+            showNotification(title: "False wake save failed", body: error.localizedDescription)
         }
         refreshMenu()
     }
@@ -780,9 +810,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         applySelectedMicrophoneBeforeRecording()
         do {
-            try wakeWordListener.start { [weak self] confidence in
-                self?.handleWakeWordDetected(confidence: confidence)
-            }
+            try wakeWordListener.start(
+                onScore: { [weak self] confidence, streak in
+                    self?.updateWakeScore(confidence: confidence, streak: streak)
+                },
+                onWake: { [weak self] confidence, samples in
+                    self?.handleWakeWordDetected(confidence: confidence, samples: samples)
+                }
+            )
             setStatus("Hands-free ready")
         } catch {
             handsFreeModeEnabled = false
@@ -793,13 +828,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshMenu()
     }
 
+    private func updateWakeScore(confidence: Float, streak: Int) {
+        latestWakeConfidence = confidence
+        latestWakeStreak = streak
+        if let latestWakeConfidence {
+            wakeWordConfidenceMenuItem.title = String(format: "Confidence: %.2f  Streak: %d", latestWakeConfidence, latestWakeStreak)
+        }
+        updateDebugWindow()
+    }
+
     private func stopWakeWordListener() {
         wakeWordListener.stop()
         refreshMenu()
     }
 
-    private func handleWakeWordDetected(confidence: Float) {
+    private func handleWakeWordDetected(confidence: Float, samples: [Int16]) {
         guard handsFreeModeEnabled, activeRecordingID == nil else { return }
+        lastWakeTriggerSamples = samples
+        latestWakeConfidence = confidence
+        latestWakeStreak = 2
         stopWakeWordListener()
         setStatus(String(format: "Wake heard %.2f", confidence))
         indicator.clearPreview()
@@ -891,6 +938,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         livePreviewMenuItem.state = livePreviewEnabled ? .on : .off
         handsFreeMenuItem.state = handsFreeModeEnabled ? .on : .off
         wakeWordListenerMenuItem.title = "Listener: \(wakeWordListener.isRunning ? "Running" : "Stopped")"
+        if let latestWakeConfidence {
+            wakeWordConfidenceMenuItem.title = String(format: "Confidence: %.2f  Streak: %d", latestWakeConfidence, latestWakeStreak)
+        } else {
+            wakeWordConfidenceMenuItem.title = "Confidence: --"
+        }
+        markFalseWakeMenuItem.isEnabled = lastWakeTriggerSamples != nil
         wakeWordStatusMenuItem.title = wakeWordStatus.shortSummary
         wakeWordSampleCountsMenuItem.title = "Samples: \(WakeWordTrainingResources.sampleCounts().menuSummary)"
         for item in shortcutMenu.items {

@@ -1,9 +1,10 @@
 import Foundation
 import LiveKitWakeWord
 
-enum WakeWordDetection: Equatable {
-    case none
-    case detected(phrase: String, confidence: Float)
+struct WakeWordPrediction: Equatable {
+    let phrase: String
+    let confidence: Float
+    let isDetected: Bool
 }
 
 enum WakeWordEngineError: Error, LocalizedError {
@@ -29,7 +30,7 @@ protocol WakeWordEngine: AnyObject {
     var requiredWindowLength: Int { get }
 
     func start() throws
-    func process(_ samples: [Int16]) throws -> WakeWordDetection
+    func process(_ samples: [Int16]) throws -> WakeWordPrediction
     func stop()
 }
 
@@ -45,7 +46,7 @@ final class LiveKitWakeWordEngine: WakeWordEngine {
     private let threshold: Float
     private var model: WakeWordModel?
 
-    init(threshold: Float = 0.74) {
+    init(threshold: Float = 0.16) {
         self.threshold = threshold
     }
 
@@ -64,7 +65,7 @@ final class LiveKitWakeWordEngine: WakeWordEngine {
         )
     }
 
-    func process(_ samples: [Int16]) throws -> WakeWordDetection {
+    func process(_ samples: [Int16]) throws -> WakeWordPrediction {
         guard let model else {
             throw WakeWordEngineError.engineNotStarted
         }
@@ -75,7 +76,11 @@ final class LiveKitWakeWordEngine: WakeWordEngine {
         let scores = try model.predict(samples)
         let modelName = WakeWordResources.classifierURL.deletingPathExtension().lastPathComponent
         let confidence = scores[modelName] ?? scores.values.max() ?? 0
-        return confidence >= threshold ? .detected(phrase: phrase, confidence: confidence) : .none
+        return WakeWordPrediction(
+            phrase: phrase,
+            confidence: confidence,
+            isDetected: confidence >= threshold
+        )
     }
 
     func stop() {

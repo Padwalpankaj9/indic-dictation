@@ -107,6 +107,13 @@ enum WakeWordTrainingResources {
         return (split, directory(for: split).appendingPathComponent(fileName))
     }
 
+    static func saveSamples(_ samples: [Int16], kind: WakeWordSampleKind) throws -> URL {
+        let sample = try nextSampleURL(for: kind)
+        let wavData = makeWAVData(samples: samples, sampleRate: 16_000)
+        try wavData.write(to: sample.url, options: .atomic)
+        return sample.url
+    }
+
     static func sampleCounts() -> WakeWordSampleCounts {
         WakeWordSampleCounts(
             positiveTrain: originalClipCount(in: directory(for: .positiveTrain)),
@@ -145,6 +152,48 @@ enum WakeWordTrainingResources {
                     options: .regularExpression
                 ) != nil
         }.count
+    }
+
+    private static func makeWAVData(samples: [Int16], sampleRate: UInt32) -> Data {
+        let channelCount: UInt16 = 1
+        let bitsPerSample: UInt16 = 16
+        let bytesPerSample = UInt16(bitsPerSample / 8)
+        let blockAlign = channelCount * bytesPerSample
+        let byteRate = sampleRate * UInt32(blockAlign)
+        let dataSize = UInt32(samples.count * Int(bytesPerSample))
+
+        var data = Data()
+        appendASCII("RIFF", to: &data)
+        appendUInt32(36 + dataSize, to: &data)
+        appendASCII("WAVE", to: &data)
+        appendASCII("fmt ", to: &data)
+        appendUInt32(16, to: &data)
+        appendUInt16(1, to: &data)
+        appendUInt16(channelCount, to: &data)
+        appendUInt32(sampleRate, to: &data)
+        appendUInt32(byteRate, to: &data)
+        appendUInt16(blockAlign, to: &data)
+        appendUInt16(bitsPerSample, to: &data)
+        appendASCII("data", to: &data)
+        appendUInt32(dataSize, to: &data)
+
+        let littleEndianSamples = samples.map { $0.littleEndian }
+        littleEndianSamples.withUnsafeBytes { data.append(contentsOf: $0) }
+        return data
+    }
+
+    private static func appendASCII(_ string: String, to data: inout Data) {
+        data.append(contentsOf: string.utf8)
+    }
+
+    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
+    }
+
+    private static func appendUInt32(_ value: UInt32, to data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
     }
 }
 
