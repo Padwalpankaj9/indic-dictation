@@ -87,7 +87,12 @@ if [[ -z "$SIGN_IDENTITY" ]]; then
   SIGN_IDENTITY="-"
 fi
 
-codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR" >/dev/null
+SIGN_OPTIONS=(--force --deep --sign "$SIGN_IDENTITY")
+if [[ "$SIGN_IDENTITY" != "-" ]]; then
+  SIGN_OPTIONS+=(--options runtime --timestamp)
+fi
+
+codesign "${SIGN_OPTIONS[@]}" "$APP_DIR" >/dev/null
 clean_bundle_metadata "$APP_DIR"
 codesign --verify --deep --strict "$APP_DIR"
 
