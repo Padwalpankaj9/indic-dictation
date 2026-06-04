@@ -30,7 +30,7 @@ final class ShortcutStateMachine {
         self.statusChanged = statusChanged
     }
 
-    func reset() {
+    func reset(notify: Bool = true) {
         if mode == .holdRecording || mode == .lockedRecording {
             stopRecording()
         }
@@ -39,7 +39,9 @@ final class ShortcutStateMachine {
         pressStartedAt = nil
         firstTapAt = nil
         tapCount = 0
-        statusChanged("Ready")
+        if notify {
+            statusChanged("Ready")
+        }
     }
 
     func update(isPressed: Bool, now: TimeInterval) {

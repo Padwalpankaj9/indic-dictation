@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var handsFreeSpeechDetected = false
     private var handsFreeStartedAt: Date?
     private var handsFreeLastVoiceAt: Date?
+    private var handsFreeStopShortcutWasPressed = false
     private var targetApp: TargetApp?
     private var lastTargetApp: TargetApp?
     private var lastFocusedTarget: FocusedTargetInfo?
@@ -238,8 +239,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func pollHotkey() {
         updateLastTargetApp()
-        guard hotkeyEnabled else { return }
         let isPressed = ShortcutPoller.isPressed(selectedShortcut)
+        if isHandsFreeRecording {
+            if activeRecordingID != nil, isPressed, !handsFreeStopShortcutWasPressed {
+                handsFreeStopShortcutWasPressed = true
+                setStatus("Manual stop")
+                stopRecording()
+            } else if !isPressed {
+                handsFreeStopShortcutWasPressed = false
+            }
+            shortcutState.reset(notify: false)
+            return
+        }
+        guard hotkeyEnabled else { return }
         shortcutState.update(isPressed: isPressed, now: Date().timeIntervalSinceReferenceDate)
     }
 
@@ -844,6 +856,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleWakeWordDetected(confidence: Float, samples: [Int16]) {
         guard handsFreeModeEnabled, activeRecordingID == nil else { return }
+        handsFreeStopShortcutWasPressed = false
         lastWakeTriggerSamples = samples
         latestWakeConfidence = confidence
         latestWakeStreak = 2
@@ -907,6 +920,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         handsFreeSpeechDetected = false
         handsFreeStartedAt = nil
         handsFreeLastVoiceAt = nil
+        handsFreeStopShortcutWasPressed = false
         if handsFreeModeEnabled {
             startWakeWordListener()
         }
