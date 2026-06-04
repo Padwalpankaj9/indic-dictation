@@ -104,22 +104,21 @@ Hands-free wake-word support is being built behind diagnostics first. The intend
 Hey Vaani
 ```
 
-The macOS implementation uses Porcupine through its local C runtime. To keep the public repo free of secrets and third-party binaries, the app looks for local wake-word assets here:
+The macOS implementation uses the open-source LiveKit WakeWord package with ONNX Runtime. There is no separate wake-word account, access key, or paid wake-word service in this path.
+
+The app looks for the local wake-word classifier here:
 
 ```bash
 ~/Library/Application Support/Indic Dictation/WakeWord
 ```
 
-Expected local files:
+Expected local file:
 
 ```text
-libpv_porcupine.dylib
-porcupine_params.pv
-hey_vaani_mac.ppn
-picovoice_access_key.txt
+hey_vaani.onnx
 ```
 
-You can also provide the Picovoice key as `PICOVOICE_ACCESS_KEY`. The `.ppn` keyword file should be generated from Picovoice Console for macOS. Use the menu bar's Wake Word section to open the folder and check setup status.
+Use the menu bar's Wake Word section to open the folder and check setup status. The classifier model can be trained or exported later using LiveKit WakeWord or compatible openWakeWord tooling.
 
 ## macOS permissions
 
@@ -137,7 +136,7 @@ The menu bar app shows a permission summary and has direct links to the relevant
 - Audio is captured locally and streamed to Sarvam for speech-to-text translation.
 - Final English text is inserted into the currently focused app on your Mac.
 - API keys are read from the local environment or `~/.config/shell/secrets.env`.
-- API keys, wake-word keys/models, recordings, generated responses, app bundles, build outputs, and local settings are excluded from git.
+- API keys, recordings, generated responses, app bundles, build outputs, and local settings are excluded from git.
 - Do not commit personal recordings or real API keys.
 
 ## Roadmap

@@ -4,25 +4,10 @@ import Foundation
 enum WakeWordResources {
     static let phrase = "Hey Vaani"
     static let directory = AppPaths.appSupport.appendingPathComponent("WakeWord")
-    static let libraryFileName = "libpv_porcupine.dylib"
-    static let modelFileName = "porcupine_params.pv"
-    static let keywordFileName = "hey_vaani_mac.ppn"
-    static let accessKeyFileName = "picovoice_access_key.txt"
+    static let classifierFileName = "hey_vaani.onnx"
 
-    static var libraryURL: URL {
-        directory.appendingPathComponent(libraryFileName)
-    }
-
-    static var modelURL: URL {
-        directory.appendingPathComponent(modelFileName)
-    }
-
-    static var keywordURL: URL {
-        directory.appendingPathComponent(keywordFileName)
-    }
-
-    static var accessKeyURL: URL {
-        directory.appendingPathComponent(accessKeyFileName)
+    static var classifierURL: URL {
+        directory.appendingPathComponent(classifierFileName)
     }
 
     static func ensureDirectory() throws {
@@ -37,32 +22,10 @@ enum WakeWordResources {
     static func setupStatus() -> WakeWordSetupStatus {
         let fileManager = FileManager.default
         var missing: [String] = []
-        if !fileManager.fileExists(atPath: libraryURL.path) {
-            missing.append(libraryFileName)
-        }
-        if !fileManager.fileExists(atPath: modelURL.path) {
-            missing.append(modelFileName)
-        }
-        if !fileManager.fileExists(atPath: keywordURL.path) {
-            missing.append(keywordFileName)
-        }
-        if loadAccessKey() == nil {
-            missing.append("PICOVOICE_ACCESS_KEY or \(accessKeyFileName)")
+        if !fileManager.fileExists(atPath: classifierURL.path) {
+            missing.append(classifierFileName)
         }
         return WakeWordSetupStatus(directory: directory, missingItems: missing)
-    }
-
-    static func loadAccessKey() -> String? {
-        if let key = ProcessInfo.processInfo.environment["PICOVOICE_ACCESS_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !key.isEmpty {
-            return key
-        }
-
-        guard let raw = try? String(contentsOf: accessKeyURL, encoding: .utf8) else {
-            return nil
-        }
-        let key = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return key.isEmpty ? nil : key
     }
 }
 
@@ -83,13 +46,15 @@ struct WakeWordSetupStatus {
             return """
             Wake phrase: \(WakeWordResources.phrase)
             Setup: Ready
+            Engine: LiveKit WakeWord
             Folder: \(directory.path)
             """
         }
 
         return """
         Wake phrase: \(WakeWordResources.phrase)
-        Setup: Needs files
+        Engine: LiveKit WakeWord
+        Setup: Needs classifier model
         Folder: \(directory.path)
         Missing:
         \(missingItems.map { "- \($0)" }.joined(separator: "\n"))

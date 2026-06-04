@@ -19,7 +19,3 @@ SwiftMarathiDictation/dist/
 *.p12
 *.mobileprovision
 secrets.env
-picovoice_access_key.txt
-*.ppn
-porcupine_params*.pv
-libpv_porcupine*.dylib

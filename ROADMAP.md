@@ -15,7 +15,7 @@ Indic Dictation aims to become a low-latency macOS dictation layer for Indic-lan
 
 - Configurable source language selection.
 - Better first-run onboarding for macOS permissions.
-- Experimental "Hey Vaani" wake-word mode using local keyword spotting.
+- Experimental "Hey Vaani" wake-word mode using open-source local keyword spotting.
 - Signed release artifacts and simpler installation.
 - Latency diagnostics visible in a user-friendly way.
 - More robust network and API-key error messages.

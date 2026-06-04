@@ -4,7 +4,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="Indic Dictation"
 EXECUTABLE_NAME="IndicDictationApp"
-RESOURCE_BUNDLE_NAME="SwiftIndicDictation_MarathiDictationApp.bundle"
 CONFIG="release"
 INSTALL_APP=false
 SIGN_IDENTITY="${INDIC_DICTATION_SIGN_IDENTITY:-${MARATHI_DICTATION_SIGN_IDENTITY:-}}"
@@ -42,15 +41,22 @@ if [[ ! -x "$EXECUTABLE" ]]; then
   EXECUTABLE="$(find "$ROOT/.build" -path "*/$CONFIG/$EXECUTABLE_NAME" -type f -perm -111 | head -n 1)"
 fi
 
-RESOURCE_BUNDLE="$(find "$ROOT/.build" -path "*/$CONFIG/$RESOURCE_BUNDLE_NAME" -type d | head -n 1)"
+RESOURCE_BUNDLES=()
+while IFS= read -r -d '' bundle; do
+  case "$(basename "$bundle")" in
+    SwiftIndicDictation_MarathiDictationApp.bundle|LiveKitWakeWord_LiveKitWakeWord.bundle)
+      RESOURCE_BUNDLES+=("$bundle")
+      ;;
+  esac
+done < <(find "$ROOT/.build" -path "*/$CONFIG/*.bundle" -type d -print0)
 
 if [[ -z "${EXECUTABLE:-}" || ! -x "$EXECUTABLE" ]]; then
   echo "Could not find built executable for $CONFIG." >&2
   exit 1
 fi
 
-if [[ -z "${RESOURCE_BUNDLE:-}" || ! -d "$RESOURCE_BUNDLE" ]]; then
-  echo "Could not find Swift resource bundle for $CONFIG." >&2
+if [[ "${#RESOURCE_BUNDLES[@]}" -eq 0 ]]; then
+  echo "Could not find Swift resource bundles for $CONFIG." >&2
   exit 1
 fi
 
@@ -63,7 +69,9 @@ mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 
 cp "$ROOT/Packaging/Info.plist" "$CONTENTS/Info.plist"
 cp "$EXECUTABLE" "$CONTENTS/MacOS/$EXECUTABLE_NAME"
-cp -R "$RESOURCE_BUNDLE" "$CONTENTS/Resources/"
+for bundle in "${RESOURCE_BUNDLES[@]}"; do
+  cp -R "$bundle" "$CONTENTS/Resources/"
+done
 cp "$ROOT/Sources/MarathiDictationApp/Resources/Icons/AppIcon.icns" "$CONTENTS/Resources/AppIcon.icns"
 
 chmod 755 "$CONTENTS/MacOS/$EXECUTABLE_NAME"

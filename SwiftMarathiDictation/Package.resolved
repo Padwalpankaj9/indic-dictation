@@ -1,0 +1,24 @@
+{
+  "originHash" : "07e705f9e298f0cbdf491a42dafb26fbfb867de47f8c70f2a2f8fe91744a67d0",
+  "pins" : [
+    {
+      "identity" : "livekit-wakeword",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/livekit/livekit-wakeword",
+      "state" : {
+        "branch" : "main",
+        "revision" : "5558b0a32c9316a0f22f2ba4e104658d3aa6238c"
+      }
+    },
+    {
+      "identity" : "onnxruntime-swift-package-manager",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/microsoft/onnxruntime-swift-package-manager",
+      "state" : {
+        "revision" : "b7fb7f7dea8a2469e6335d95a61b8f36d0dc83b2",
+        "version" : "1.24.2"
+      }
+    }
+  ],
+  "version" : 3
+}
