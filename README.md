@@ -104,7 +104,7 @@ Hands-free wake-word support is being built behind diagnostics first. The intend
 Hey Vaani
 ```
 
-The macOS implementation uses the open-source LiveKit WakeWord package with ONNX Runtime. There is no separate wake-word account, access key, or paid wake-word service in this path.
+The macOS implementation uses the open-source LiveKit WakeWord package with ONNX Runtime. There is no separate wake-word account, access key, or paid wake-word service in this detection path.
 
 The app looks for the local wake-word classifier here:
 
@@ -135,6 +135,19 @@ cd SwiftMarathiDictation
 ```
 
 The script trains a local `hey_vaani.onnx` model from your recordings and installs it into the Wake Word folder.
+
+### Sarvam TTS hard negatives
+
+Near-miss phrases such as `Hey Vanita`, `Hey Vayu`, `Hey Vaibhav`, and similar Marathi phrases should be added as negative training samples. You can generate those with Sarvam Text-to-Speech:
+
+```bash
+cd SwiftMarathiDictation
+./scripts/generate_sarvam_hard_negative_samples.sh --dry-run --negative-count 20
+./scripts/generate_sarvam_hard_negative_samples.sh --negative-count 80 --positive-count 0
+./scripts/train_wakeword_from_samples.sh
+```
+
+This requires `SARVAM_API_KEY` in the shell environment and uses Sarvam API credits. Keep `--positive-count 0` unless you intentionally want synthetic wake samples; real wake samples from your own voice should remain the anchor.
 
 ## macOS permissions
 
