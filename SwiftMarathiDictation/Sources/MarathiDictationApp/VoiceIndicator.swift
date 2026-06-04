@@ -135,18 +135,18 @@ private struct IndicatorRoot: View {
         }
         .animation(.easeOut(duration: 0.2), value: hasText)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .padding(.bottom, 36)
+        .padding(.bottom, 18)
     }
 
     // A larger glass pill makes the listening state obvious without showing extra text.
     private var glyphPill: some View {
-        let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
-        return HStack(spacing: 14) {
+        let shape = RoundedRectangle(cornerRadius: 17, style: .continuous)
+        return HStack(spacing: 6.5) {
             MicBadge()
 
             Rectangle()
-                .fill(Color.white.opacity(0.12))
-                .frame(width: 1, height: 28)
+                .fill(Color.white.opacity(0.10))
+                .frame(width: 1, height: 19)
 
             Group {
                 switch model.state {
@@ -162,26 +162,35 @@ private struct IndicatorRoot: View {
             }
             .frame(maxWidth: .infinity)
         }
-        .padding(.leading, 9)
-        .padding(.trailing, 18)
-        .frame(width: 330, height: 58)
-        .background(VisualEffectBackground().clipShape(shape))
+        .padding(.leading, 6.5)
+        .padding(.trailing, 10.5)
+        .frame(width: 216, height: 34)
         .background(
             LinearGradient(
-                colors: [Color.black.opacity(0.94), Color.black.opacity(0.82)],
+                colors: [Color.black.opacity(0.98), Color(red: 0.08, green: 0.08, blue: 0.08).opacity(0.96)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             .clipShape(shape)
         )
-        .overlay(shape.strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+        .overlay(
+            shape
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.22), Color.white.opacity(0.08)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.9
+                )
+        )
         .overlay(
             shape
                 .strokeBorder(Color.black.opacity(0.9), lineWidth: 1)
                 .padding(1)
         )
         .clipShape(shape)
-        .shadow(color: .black.opacity(0.42), radius: 18, x: 0, y: 8)
+        .shadow(color: .black.opacity(0.32), radius: 9, x: 0, y: 3)
     }
 }
 
@@ -203,15 +212,15 @@ private struct MicBadge: View {
     var body: some View {
         ZStack {
             Circle()
-                .fill(Color.white.opacity(0.08))
+                .fill(Color.white.opacity(0.06))
             Circle()
-                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.9)
             Image(systemName: "mic.fill")
-                .font(.system(size: 24, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Color.white)
                 .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
         }
-        .frame(width: 42, height: 42)
+        .frame(width: 26, height: 26)
     }
 }
 
@@ -232,29 +241,30 @@ private struct WaveBars: View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             let level = CGFloat(meter.value)
-            HStack(spacing: 3.4) {
+            HStack(spacing: 2.4) {
                 ForEach(weights.indices, id: \.self) { index in
                     Capsule()
                         .fill(Color.white.opacity(barOpacity(index, level)))
-                        .frame(width: 1.6, height: barHeight(index, t, level))
+                        .frame(width: 1.25, height: barHeight(index, t, level))
                 }
             }
-            .frame(width: 210, height: 34)
+            .frame(width: 142, height: 22)
         }
     }
 
     private func barHeight(_ index: Int, _ t: TimeInterval, _ level: CGFloat) -> CGFloat {
-        let base: CGFloat = 3.0
-        let maxHeight: CGFloat = 26
+        let base: CGFloat = 2.4
+        let maxHeight: CGFloat = 19
         let idle = 0.5 + 0.5 * sin(t * 3.8 + Double(index) * 0.64)
-        let energy = level * weights[index]
-        let mix = max(CGFloat(idle) * 0.05, energy)
+        let boostedLevel = min(1, pow(level * 2.7, 0.72))
+        let energy = boostedLevel * weights[index]
+        let mix = max(CGFloat(idle) * 0.08, energy)
         return base + mix * maxHeight
     }
 
     private func barOpacity(_ index: Int, _ level: CGFloat) -> CGFloat {
         let edgeFade = min(1, CGFloat(min(index + 3, weights.count - index + 2)) / 8)
-        return min(1, 0.38 + edgeFade * 0.42 + level * 0.25)
+        return min(1, 0.58 + edgeFade * 0.32 + min(1, level * 2.0) * 0.20)
     }
 }
 
@@ -286,10 +296,6 @@ private struct ProcessingSpinner: View {
 
     var body: some View {
         HStack(spacing: 20) {
-            Rectangle()
-                .fill(Color.white.opacity(0.12))
-                .frame(width: 120, height: 1)
-
             Circle()
                 .trim(from: 0, to: 0.82)
                 .stroke(
@@ -299,7 +305,7 @@ private struct ProcessingSpinner: View {
                     ),
                     style: StrokeStyle(lineWidth: 2.2, lineCap: .round)
                 )
-                .frame(width: 18, height: 18)
+                .frame(width: 15, height: 15)
                 .rotationEffect(.degrees(spin ? 360 : 0))
                 .onAppear {
                     withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
@@ -307,10 +313,10 @@ private struct ProcessingSpinner: View {
                     }
                 }
 
-            Rectangle()
-                .fill(Color.white.opacity(0.12))
-                .frame(width: 22, height: 1)
+            Text("Finalizing")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.72))
         }
-        .frame(width: 210, height: 34)
+        .frame(width: 142, height: 22)
     }
 }
