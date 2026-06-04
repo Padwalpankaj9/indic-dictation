@@ -138,24 +138,50 @@ private struct IndicatorRoot: View {
         .padding(.bottom, 36)
     }
 
-    // A slim black listening pill. Keep it visually quiet so it does not compete with the text field.
+    // A larger glass pill makes the listening state obvious without showing extra text.
     private var glyphPill: some View {
-        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
-        return Group {
-            switch model.state {
-            case .recording:
-                WaveBars(meter: model.meter)
-            case .processing:
-                ProcessingSpinner()
+        let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
+        return HStack(spacing: 14) {
+            MicBadge()
+
+            Rectangle()
+                .fill(Color.white.opacity(0.12))
+                .frame(width: 1, height: 28)
+
+            Group {
+                switch model.state {
+                case .recording:
+                    WaveBars(meter: model.meter)
+                case .processing:
+                    HStack {
+                        Spacer(minLength: 0)
+                        ProcessingSpinner()
+                        Spacer(minLength: 0)
+                    }
+                }
             }
+            .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 4)
-        .frame(minWidth: 56, minHeight: 20)
-        .background(Color.black)
-        .overlay(shape.strokeBorder(Color.white.opacity(0.14), lineWidth: 0.8))
+        .padding(.leading, 9)
+        .padding(.trailing, 18)
+        .frame(width: 330, height: 58)
+        .background(VisualEffectBackground().clipShape(shape))
+        .background(
+            LinearGradient(
+                colors: [Color.black.opacity(0.94), Color.black.opacity(0.82)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .clipShape(shape)
+        )
+        .overlay(shape.strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+        .overlay(
+            shape
+                .strokeBorder(Color.black.opacity(0.9), lineWidth: 1)
+                .padding(1)
+        )
         .clipShape(shape)
-        .shadow(color: .black.opacity(0.24), radius: 8, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.42), radius: 18, x: 0, y: 8)
     }
 }
 
@@ -173,34 +199,62 @@ private struct VisualEffectBackground: NSViewRepresentable {
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
-/// Five slim bars that respond to live mic loudness without looking heavy.
+private struct MicBadge: View {
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.white.opacity(0.08))
+            Circle()
+                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+            Image(systemName: "mic.fill")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+        }
+        .frame(width: 42, height: 42)
+    }
+}
+
+/// A wider waveform that responds to live mic loudness and reads clearly at a glance.
 private struct WaveBars: View {
     let meter: AudioLevelMeter
 
-    private let weights: [CGFloat] = [0.5, 0.78, 1.0, 0.78, 0.5]
+    private let weights: [CGFloat] = [
+        0.16, 0.24, 0.38, 0.58, 0.74, 0.48,
+        0.32, 0.66, 0.92, 0.72, 0.44, 0.30,
+        0.54, 0.84, 1.00, 0.86, 0.60, 0.36,
+        0.42, 0.70, 0.96, 0.78, 0.52, 0.30,
+        0.24, 0.46, 0.68, 0.50, 0.34, 0.22,
+        0.16, 0.12
+    ]
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             let level = CGFloat(meter.value)
-            HStack(spacing: 2.5) {
+            HStack(spacing: 3.4) {
                 ForEach(weights.indices, id: \.self) { index in
                     Capsule()
-                        .fill(Color.white.opacity(0.94))
-                        .frame(width: 1.4, height: barHeight(index, t, level))
+                        .fill(Color.white.opacity(barOpacity(index, level)))
+                        .frame(width: 1.6, height: barHeight(index, t, level))
                 }
             }
-            .frame(height: 10)
+            .frame(width: 210, height: 34)
         }
     }
 
     private func barHeight(_ index: Int, _ t: TimeInterval, _ level: CGFloat) -> CGFloat {
-        let base: CGFloat = 1.5
-        let maxHeight: CGFloat = 8
-        let idle = 0.5 + 0.5 * sin(t * 3.0 + Double(index) * 0.9)
+        let base: CGFloat = 3.0
+        let maxHeight: CGFloat = 26
+        let idle = 0.5 + 0.5 * sin(t * 3.8 + Double(index) * 0.64)
         let energy = level * weights[index]
-        let mix = max(CGFloat(idle) * 0.08, energy)
+        let mix = max(CGFloat(idle) * 0.05, energy)
         return base + mix * maxHeight
+    }
+
+    private func barOpacity(_ index: Int, _ level: CGFloat) -> CGFloat {
+        let edgeFade = min(1, CGFloat(min(index + 3, weights.count - index + 2)) / 8)
+        return min(1, 0.38 + edgeFade * 0.42 + level * 0.25)
     }
 }
 
@@ -231,22 +285,32 @@ private struct ProcessingSpinner: View {
     @State private var spin = false
 
     var body: some View {
-        Circle()
-            .trim(from: 0, to: 0.82)
-            .stroke(
-                AngularGradient(
-                    colors: [Color.white.opacity(0.16), Color.white.opacity(0.94)],
-                    center: .center
-                ),
-                style: StrokeStyle(lineWidth: 1.8, lineCap: .round)
-            )
-            .frame(width: 12, height: 12)
-            .rotationEffect(.degrees(spin ? 360 : 0))
-            .frame(width: 14, height: 14)
-            .onAppear {
-                withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
-                    spin = true
+        HStack(spacing: 20) {
+            Rectangle()
+                .fill(Color.white.opacity(0.12))
+                .frame(width: 120, height: 1)
+
+            Circle()
+                .trim(from: 0, to: 0.82)
+                .stroke(
+                    AngularGradient(
+                        colors: [Color.white.opacity(0.14), Color.white.opacity(0.96)],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 2.2, lineCap: .round)
+                )
+                .frame(width: 18, height: 18)
+                .rotationEffect(.degrees(spin ? 360 : 0))
+                .onAppear {
+                    withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
+                        spin = true
+                    }
                 }
-            }
+
+            Rectangle()
+                .fill(Color.white.opacity(0.12))
+                .frame(width: 22, height: 1)
+        }
+        .frame(width: 210, height: 34)
     }
 }
