@@ -1,13 +1,6 @@
-import AppKit
 import ApplicationServices
 import AVFoundation
 import CoreGraphics
-
-enum PrivacyPane: String {
-    case accessibility = "Privacy_Accessibility"
-    case inputMonitoring = "Privacy_ListenEvent"
-    case microphone = "Privacy_Microphone"
-}
 
 enum PermissionManager {
     static var microphoneGranted: Bool {
@@ -24,6 +17,10 @@ enum PermissionManager {
 
     static var accessibilityGranted: Bool {
         AXIsProcessTrusted()
+    }
+
+    static var allRequiredGranted: Bool {
+        microphoneGranted && inputMonitoringGranted && pasteEventsGranted
     }
 
     static var compactSummary: String {
@@ -70,13 +67,6 @@ enum PermissionManager {
                 onResolved()
             }
         }
-    }
-
-    static func openSettings(_ pane: PrivacyPane) {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane.rawValue)") else {
-            return
-        }
-        NSWorkspace.shared.open(url)
     }
 
     private static func mark(_ granted: Bool) -> String {

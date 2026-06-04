@@ -71,12 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotkeyMenuItem = NSMenuItem(title: "Hotkey Enabled", action: #selector(toggleHotkey), keyEquivalent: "")
     private let livePreviewMenuItem = NSMenuItem(title: "Show Live Preview", action: #selector(toggleLivePreview), keyEquivalent: "")
     private let handsFreeMenuItem = NSMenuItem(title: "Hands-free Mode", action: #selector(toggleHandsFreeMode), keyEquivalent: "")
-    private let wakeWordListenerMenuItem = NSMenuItem(title: "Listener: Stopped", action: nil, keyEquivalent: "")
     private let wakeWordConfidenceMenuItem = NSMenuItem(title: "Confidence: --", action: nil, keyEquivalent: "")
     private let wakeWordSensitivityMenuItem = NSMenuItem(title: "Sensitivity: 0.50", action: nil, keyEquivalent: "")
-    private let markFalseWakeMenuItem = NSMenuItem(title: "Mark Last Wake as False Trigger", action: #selector(markLastWakeAsFalseTrigger), keyEquivalent: "")
-    private let wakeWordStatusMenuItem = NSMenuItem(title: "Check Wake Word Setup", action: #selector(checkWakeWordSetup), keyEquivalent: "")
-    private let wakeWordSampleCountsMenuItem = NSMenuItem(title: "Samples: Wake 0  Other 0", action: nil, keyEquivalent: "")
     private let shortcutMenu = NSMenu()
     private let microphoneMenu = NSMenu()
     private lazy var wakeWordSensitivitySlider: NSSlider = {
@@ -154,6 +150,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(permissionsMenuItem)
         menu.addItem(.separator())
 
+        handsFreeMenuItem.target = self
+        handsFreeMenuItem.state = handsFreeModeEnabled ? .on : .off
+        menu.addItem(handsFreeMenuItem)
+
         hotkeyMenuItem.target = self
         hotkeyMenuItem.state = .on
         menu.addItem(hotkeyMenuItem)
@@ -188,63 +188,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let wakeWordRoot = NSMenuItem(title: "Wake Word", action: nil, keyEquivalent: "")
         let wakeWordMenu = NSMenu()
-        handsFreeMenuItem.target = self
-        handsFreeMenuItem.state = handsFreeModeEnabled ? .on : .off
-        wakeWordMenu.addItem(handsFreeMenuItem)
-        wakeWordListenerMenuItem.isEnabled = false
-        wakeWordMenu.addItem(wakeWordListenerMenuItem)
         wakeWordConfidenceMenuItem.isEnabled = false
         wakeWordMenu.addItem(wakeWordConfidenceMenuItem)
         wakeWordSensitivityMenuItem.isEnabled = false
         wakeWordMenu.addItem(wakeWordSensitivityMenuItem)
         wakeWordMenu.addItem(wakeWordSensitivitySliderItem)
-        markFalseWakeMenuItem.target = self
-        wakeWordMenu.addItem(markFalseWakeMenuItem)
-        wakeWordMenu.addItem(.separator())
-        wakeWordStatusMenuItem.target = self
-        wakeWordMenu.addItem(wakeWordStatusMenuItem)
-        let openWakeWordFolderItem = NSMenuItem(title: "Open Wake Word Folder", action: #selector(openWakeWordFolder), keyEquivalent: "")
-        openWakeWordFolderItem.target = self
-        wakeWordMenu.addItem(openWakeWordFolderItem)
-        wakeWordMenu.addItem(.separator())
-        wakeWordSampleCountsMenuItem.isEnabled = false
-        wakeWordMenu.addItem(wakeWordSampleCountsMenuItem)
-        let recordWakeSampleItem = NSMenuItem(title: "Record Wake Sample", action: #selector(recordWakeWordSample), keyEquivalent: "")
-        recordWakeSampleItem.target = self
-        wakeWordMenu.addItem(recordWakeSampleItem)
-        let recordNegativeSampleItem = NSMenuItem(title: "Record Other Speech Sample", action: #selector(recordNegativeWakeWordSample), keyEquivalent: "")
-        recordNegativeSampleItem.target = self
-        wakeWordMenu.addItem(recordNegativeSampleItem)
-        let openTrainingFolderItem = NSMenuItem(title: "Open Training Samples Folder", action: #selector(openWakeWordTrainingFolder), keyEquivalent: "")
-        openTrainingFolderItem.target = self
-        wakeWordMenu.addItem(openTrainingFolderItem)
         wakeWordRoot.submenu = wakeWordMenu
         menu.addItem(wakeWordRoot)
-
-        let diagnosticsRoot = NSMenuItem(title: "Diagnostics", action: nil, keyEquivalent: "")
-        let diagnosticsMenu = NSMenu()
-        let inspectFocusedItem = NSMenuItem(title: "Inspect Focused Target", action: #selector(inspectFocusedTarget), keyEquivalent: "")
-        inspectFocusedItem.target = self
-        diagnosticsMenu.addItem(inspectFocusedItem)
-        let pasteTestItem = NSMenuItem(title: "Test Paste Into Current Field", action: #selector(testPasteIntoCurrentField), keyEquivalent: "")
-        pasteTestItem.target = self
-        diagnosticsMenu.addItem(pasteTestItem)
-        diagnosticsRoot.submenu = diagnosticsMenu
-        menu.addItem(diagnosticsRoot)
-
-        menu.addItem(.separator())
-
-        let debugItem = NSMenuItem(title: "Open Debug Window", action: #selector(openDebugWindow), keyEquivalent: "")
-        debugItem.target = self
-        menu.addItem(debugItem)
-
-        let permissionsRoot = NSMenuItem(title: "Open Permission Settings", action: nil, keyEquivalent: "")
-        let permissionsMenu = NSMenu()
-        permissionsMenu.addItem(settingsItem(title: "Microphone", action: #selector(openMicrophoneSettings)))
-        permissionsMenu.addItem(settingsItem(title: "Input Monitoring", action: #selector(openInputMonitoringSettings)))
-        permissionsMenu.addItem(settingsItem(title: "Accessibility", action: #selector(openAccessibilitySettings)))
-        permissionsRoot.submenu = permissionsMenu
-        menu.addItem(permissionsRoot)
 
         menu.addItem(.separator())
         let quitItem = NSMenuItem(title: "Quit Indic Dictation", action: #selector(quit), keyEquivalent: "q")
@@ -253,12 +203,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem.menu = menu
         refreshMenu()
-    }
-
-    private func settingsItem(title: String, action: Selector) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-        item.target = self
-        return item
     }
 
     private func startPolling() {
@@ -418,28 +362,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setStatus("Copied last English")
     }
 
-    @objc private func inspectFocusedTarget() {
-        lastFocusedTarget = PasteHelper.focusedTargetInfo()
-        if let lastFocusedTarget {
-            setStatus("Focused: \(lastFocusedTarget.appName)")
-        } else {
-            setStatus("No focused target")
-        }
-        updateDebugWindow()
-    }
-
-    @objc private func testPasteIntoCurrentField() {
-        let target = PasteHelper.captureFrontmostApp()
-        do {
-            lastPasteResult = try PasteHelper.paste("Indic Dictation paste test", into: target)
-            setStatus("Paste test sent")
-        } catch {
-            setStatus("Paste test failed")
-            showNotification(title: "Paste test failed", body: error.localizedDescription)
-        }
-        updateDebugWindow()
-    }
-
     @objc private func checkWakeWordSetup() {
         wakeWordStatus = WakeWordResources.setupStatus()
         setStatus(wakeWordStatus.shortSummary)
@@ -504,27 +426,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.updateDebugWindow()
         }
         refreshMenu()
-    }
-
-    @objc private func openMicrophoneSettings() {
-        PermissionManager.openSettings(.microphone)
-    }
-
-    @objc private func openInputMonitoringSettings() {
-        PermissionManager.openSettings(.inputMonitoring)
-    }
-
-    @objc private func openAccessibilitySettings() {
-        PermissionManager.openSettings(.accessibility)
-    }
-
-    @objc private func openDebugWindow() {
-        if debugWindow == nil {
-            createDebugWindow()
-        }
-        updateDebugWindow()
-        debugWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func quit() {
@@ -994,10 +895,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshMenu() {
         wakeWordStatus = WakeWordResources.setupStatus()
         permissionsMenuItem.title = "Permissions: \(PermissionManager.compactSummary)"
+        permissionsMenuItem.isHidden = PermissionManager.allRequiredGranted
         hotkeyMenuItem.state = hotkeyEnabled ? .on : .off
         livePreviewMenuItem.state = livePreviewEnabled ? .on : .off
         handsFreeMenuItem.state = handsFreeModeEnabled ? .on : .off
-        wakeWordListenerMenuItem.title = "Listener: \(wakeWordListener.isRunning ? "Running" : "Stopped")"
         if let latestWakeConfidence {
             wakeWordConfidenceMenuItem.title = String(format: "Confidence: %.2f  Streak: %d", latestWakeConfidence, latestWakeStreak)
         } else {
@@ -1009,9 +910,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             wakeWordThreshold
         )
         wakeWordSensitivitySlider.doubleValue = wakeWordSensitivity
-        markFalseWakeMenuItem.isEnabled = lastWakeTriggerSamples != nil
-        wakeWordStatusMenuItem.title = wakeWordStatus.shortSummary
-        wakeWordSampleCountsMenuItem.title = "Samples: \(WakeWordTrainingResources.sampleCounts().menuSummary)"
         for item in shortcutMenu.items {
             item.state = item.title == selectedShortcut.name ? .on : .off
         }
