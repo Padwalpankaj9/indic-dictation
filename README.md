@@ -89,10 +89,37 @@ Use the menu bar menu to:
 - Choose the microphone input or refresh connected microphones.
 - Toggle the live preview text.
 - Copy the last English result.
+- Check experimental wake-word setup.
+- Run paste and focused-target diagnostics.
 - Open permission settings.
 - Open the debug window.
 
 The bottom-center indicator shows animated voice bars while recording and a spinner while translating.
+
+## Experimental wake word
+
+Hands-free wake-word support is being built behind diagnostics first. The intended wake phrase is:
+
+```text
+Hey Vaani
+```
+
+The macOS implementation uses Porcupine through its local C runtime. To keep the public repo free of secrets and third-party binaries, the app looks for local wake-word assets here:
+
+```bash
+~/Library/Application Support/Indic Dictation/WakeWord
+```
+
+Expected local files:
+
+```text
+libpv_porcupine.dylib
+porcupine_params.pv
+hey_vaani_mac.ppn
+picovoice_access_key.txt
+```
+
+You can also provide the Picovoice key as `PICOVOICE_ACCESS_KEY`. The `.ppn` keyword file should be generated from Picovoice Console for macOS. Use the menu bar's Wake Word section to open the folder and check setup status.
 
 ## macOS permissions
 
@@ -110,7 +137,7 @@ The menu bar app shows a permission summary and has direct links to the relevant
 - Audio is captured locally and streamed to Sarvam for speech-to-text translation.
 - Final English text is inserted into the currently focused app on your Mac.
 - API keys are read from the local environment or `~/.config/shell/secrets.env`.
-- API keys, recordings, generated responses, app bundles, build outputs, and local settings are excluded from git.
+- API keys, wake-word keys/models, recordings, generated responses, app bundles, build outputs, and local settings are excluded from git.
 - Do not commit personal recordings or real API keys.
 
 ## Roadmap

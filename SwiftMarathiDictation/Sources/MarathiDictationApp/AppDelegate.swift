@@ -13,6 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyEnabled = true
     private var livePreviewEnabled = AppSettings.loadLivePreviewEnabled()
     private var targetApp: TargetApp?
+    private var lastFocusedTarget: FocusedTargetInfo?
+    private var lastPasteResult: PasteResult?
+    private var wakeWordStatus = WakeWordResources.setupStatus()
     private var latestEnglish = ""
     private var liveEnglish = ""
     private var currentStatus = "Ready"
@@ -43,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let permissionsMenuItem = NSMenuItem(title: "Permissions: Checking...", action: #selector(checkPermissions), keyEquivalent: "")
     private let hotkeyMenuItem = NSMenuItem(title: "Hotkey Enabled", action: #selector(toggleHotkey), keyEquivalent: "")
     private let livePreviewMenuItem = NSMenuItem(title: "Show Live Preview", action: #selector(toggleLivePreview), keyEquivalent: "")
+    private let wakeWordStatusMenuItem = NSMenuItem(title: "Check Wake Word Setup", action: #selector(checkWakeWordSetup), keyEquivalent: "")
     private let shortcutMenu = NSMenu()
     private let microphoneMenu = NSMenu()
 
@@ -113,6 +117,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let copyItem = NSMenuItem(title: "Copy Last English", action: #selector(copyLastEnglish), keyEquivalent: "")
         copyItem.target = self
         menu.addItem(copyItem)
+
+        menu.addItem(.separator())
+
+        let wakeWordRoot = NSMenuItem(title: "Wake Word", action: nil, keyEquivalent: "")
+        let wakeWordMenu = NSMenu()
+        wakeWordStatusMenuItem.target = self
+        wakeWordMenu.addItem(wakeWordStatusMenuItem)
+        let openWakeWordFolderItem = NSMenuItem(title: "Open Wake Word Folder", action: #selector(openWakeWordFolder), keyEquivalent: "")
+        openWakeWordFolderItem.target = self
+        wakeWordMenu.addItem(openWakeWordFolderItem)
+        wakeWordRoot.submenu = wakeWordMenu
+        menu.addItem(wakeWordRoot)
+
+        let diagnosticsRoot = NSMenuItem(title: "Diagnostics", action: nil, keyEquivalent: "")
+        let diagnosticsMenu = NSMenu()
+        let inspectFocusedItem = NSMenuItem(title: "Inspect Focused Target", action: #selector(inspectFocusedTarget), keyEquivalent: "")
+        inspectFocusedItem.target = self
+        diagnosticsMenu.addItem(inspectFocusedItem)
+        let pasteTestItem = NSMenuItem(title: "Test Paste Into Current Field", action: #selector(testPasteIntoCurrentField), keyEquivalent: "")
+        pasteTestItem.target = self
+        diagnosticsMenu.addItem(pasteTestItem)
+        diagnosticsRoot.submenu = diagnosticsMenu
+        menu.addItem(diagnosticsRoot)
 
         menu.addItem(.separator())
 
@@ -236,6 +263,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(latestEnglish, forType: .string)
         setStatus("Copied last English")
+    }
+
+    @objc private func inspectFocusedTarget() {
+        lastFocusedTarget = PasteHelper.focusedTargetInfo()
+        if let lastFocusedTarget {
+            setStatus("Focused: \(lastFocusedTarget.appName)")
+        } else {
+            setStatus("No focused target")
+        }
+        updateDebugWindow()
+    }
+
+    @objc private func testPasteIntoCurrentField() {
+        let target = PasteHelper.captureFrontmostApp()
+        do {
+            lastPasteResult = try PasteHelper.paste("Indic Dictation paste test", into: target)
+            setStatus("Paste test sent")
+        } catch {
+            setStatus("Paste test failed")
+            showNotification(title: "Paste test failed", body: error.localizedDescription)
+        }
+        updateDebugWindow()
+    }
+
+    @objc private func checkWakeWordSetup() {
+        wakeWordStatus = WakeWordResources.setupStatus()
+        setStatus(wakeWordStatus.shortSummary)
+        showNotification(title: "Wake Word", body: wakeWordStatus.shortSummary)
+        updateDebugWindow()
+    }
+
+    @objc private func openWakeWordFolder() {
+        do {
+            try WakeWordResources.openDirectory()
+            setStatus("Opened wake word folder")
+        } catch {
+            setStatus("Could not open folder")
+            showNotification(title: "Wake word folder error", body: error.localizedDescription)
+        }
+        updateDebugWindow()
     }
 
     @objc private func checkPermissions() {
@@ -433,7 +500,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.setStatus("No speech detected")
                         return
                     }
-                    try PasteHelper.paste(result.text, into: targetApp)
+                    self.lastPasteResult = try PasteHelper.paste(result.text, into: targetApp)
                     self.markLatency("paste complete")
                     self.indicator.hide()
                     self.setStatus("Pasted. \(String(format: "%.1f", latency))s")
@@ -556,9 +623,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshMenu() {
+        wakeWordStatus = WakeWordResources.setupStatus()
         permissionsMenuItem.title = "Permissions: \(PermissionManager.compactSummary)"
         hotkeyMenuItem.state = hotkeyEnabled ? .on : .off
         livePreviewMenuItem.state = livePreviewEnabled ? .on : .off
+        wakeWordStatusMenuItem.title = wakeWordStatus.shortSummary
         for item in shortcutMenu.items {
             item.state = item.title == selectedShortcut.name ? .on : .off
         }
@@ -683,6 +752,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let live = liveEnglish.isEmpty ? "(none)" : liveEnglish
         let target = targetApp?.name ?? "(none)"
         let latency = latencyMarks.isEmpty ? "(none)" : latencyMarks.joined(separator: "\n")
+        let focused = lastFocusedTarget?.summary ?? "(none)"
+        let paste = lastPasteResult?.summary ?? "(none)"
         debugTextView.string = """
         Status: \(currentStatus)
         Hotkey: \(hotkeyEnabled ? "Enabled" : "Disabled")
@@ -693,6 +764,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Permissions:
         \(PermissionManager.detailedSummary)
+
+        Wake Word:
+        \(wakeWordStatus.detailedSummary)
+
+        Focused Target:
+        \(focused)
+
+        Last Paste:
+        \(paste)
 
         Live English:
         \(live)

@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Carbon
 
 enum ShortcutPoller {
@@ -34,6 +35,53 @@ struct TargetApp {
     let bundleIdentifier: String
 }
 
+struct FocusedTargetInfo {
+    let appName: String
+    let bundleIdentifier: String?
+    let processIdentifier: pid_t?
+    let role: String?
+    let subrole: String?
+    let title: String?
+
+    var summary: String {
+        [
+            "App: \(appName)",
+            "Bundle: \(bundleIdentifier ?? "(unknown)")",
+            "PID: \(processIdentifier.map(String.init) ?? "(unknown)")",
+            "Role: \(role ?? "(unknown)")",
+            "Subrole: \(subrole ?? "(none)")",
+            "Title: \(title ?? "(none)")",
+            "Likely editable: \(likelyEditable ? "yes" : "unknown")"
+        ].joined(separator: "\n")
+    }
+
+    var likelyEditable: Bool {
+        guard let role else { return false }
+        return role.localizedCaseInsensitiveContains("text")
+            || role.localizedCaseInsensitiveContains("field")
+            || role.localizedCaseInsensitiveContains("area")
+    }
+}
+
+struct PasteResult {
+    let target: TargetApp?
+    let focusedTarget: FocusedTargetInfo?
+    let textLength: Int
+    let restoredClipboardItems: Int
+    let method: String
+
+    var summary: String {
+        [
+            "Method: \(method)",
+            "Target: \(target?.name ?? "(frontmost)")",
+            "Focused app: \(focusedTarget?.appName ?? "(unknown)")",
+            "Focused role: \(focusedTarget?.role ?? "(unknown)")",
+            "Text length: \(textLength)",
+            "Clipboard items restored: \(restoredClipboardItems)"
+        ].joined(separator: "\n")
+    }
+}
+
 enum PasteHelper {
     static func captureFrontmostApp() -> TargetApp? {
         guard
@@ -45,13 +93,57 @@ enum PasteHelper {
         return TargetApp(name: app.localizedName ?? bundleID, bundleIdentifier: bundleID)
     }
 
-    static func paste(_ text: String, into target: TargetApp?) throws {
+    static func focusedTargetInfo() -> FocusedTargetInfo? {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        let systemElement = AXUIElementCreateSystemWide()
+        var focusedElementRef: CFTypeRef?
+        let focusedError = AXUIElementCopyAttributeValue(
+            systemElement,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedElementRef
+        )
+
+        var processIdentifier: pid_t?
+        var role: String?
+        var subrole: String?
+        var title: String?
+
+        if focusedError == .success, let focusedElement = focusedElementRef {
+            let element = focusedElement as! AXUIElement
+            var pid: pid_t = 0
+            if AXUIElementGetPid(element, &pid) == .success {
+                processIdentifier = pid
+            }
+            role = stringAttribute(kAXRoleAttribute, from: element)
+            subrole = stringAttribute(kAXSubroleAttribute, from: element)
+            title = stringAttribute(kAXTitleAttribute, from: element)
+        }
+
+        return FocusedTargetInfo(
+            appName: app.localizedName ?? app.bundleIdentifier ?? "(unknown)",
+            bundleIdentifier: app.bundleIdentifier,
+            processIdentifier: processIdentifier ?? app.processIdentifier,
+            role: role,
+            subrole: subrole,
+            title: title
+        )
+    }
+
+    @discardableResult
+    static func paste(_ text: String, into target: TargetApp?) throws -> PasteResult {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return
+            return PasteResult(
+                target: target,
+                focusedTarget: focusedTargetInfo(),
+                textLength: 0,
+                restoredClipboardItems: 0,
+                method: "skipped empty text"
+            )
         }
 
         let pasteboard = NSPasteboard.general
-        let previous = pasteboard.string(forType: .string)
+        let previous = PasteboardSnapshot.capture(from: pasteboard)
+        let previousItemCount = previous.itemCount
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
@@ -68,12 +160,55 @@ enum PasteHelper {
             vDown?.post(tap: .cghidEventTap)
             vUp?.post(tap: .cghidEventTap)
 
-            if let previous {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    pasteboard.clearContents()
-                    pasteboard.setString(previous, forType: .string)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                previous.restore(to: .general)
+            }
+        }
+
+        return PasteResult(
+            target: target,
+            focusedTarget: focusedTargetInfo(),
+            textLength: text.count,
+            restoredClipboardItems: previousItemCount,
+            method: "clipboard + Command-V"
+        )
+    }
+
+    private static func stringAttribute(_ name: String, from element: AXUIElement) -> String? {
+        var valueRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, name as CFString, &valueRef) == .success else {
+            return nil
+        }
+        return valueRef as? String
+    }
+}
+
+private struct PasteboardSnapshot: @unchecked Sendable {
+    let items: [NSPasteboardItem]
+
+    var itemCount: Int {
+        items.count
+    }
+
+    static func capture(from pasteboard: NSPasteboard) -> PasteboardSnapshot {
+        let copiedItems = (pasteboard.pasteboardItems ?? []).map { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    copy.setData(data, forType: type)
+                } else if let string = item.string(forType: type) {
+                    copy.setString(string, forType: type)
                 }
             }
+            return copy
+        }
+        return PasteboardSnapshot(items: copiedItems)
+    }
+
+    func restore(to pasteboard: NSPasteboard) {
+        pasteboard.clearContents()
+        if !items.isEmpty {
+            pasteboard.writeObjects(items)
         }
     }
 }
