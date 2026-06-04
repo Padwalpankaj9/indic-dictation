@@ -12,7 +12,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let selectedQualityMode = DictationQualityMode.accurate
     private var hotkeyEnabled = true
     private var livePreviewEnabled = AppSettings.loadLivePreviewEnabled()
+    private var handsFreeModeEnabled = AppSettings.loadHandsFreeModeEnabled()
+    private var isHandsFreeRecording = false
+    private var handsFreeSpeechDetected = false
+    private var handsFreeStartedAt: Date?
+    private var handsFreeLastVoiceAt: Date?
     private var targetApp: TargetApp?
+    private var lastTargetApp: TargetApp?
     private var lastFocusedTarget: FocusedTargetInfo?
     private var lastPasteResult: PasteResult?
     private var wakeWordStatus = WakeWordResources.setupStatus()
@@ -23,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let recorder = AudioRecorder()
     private let indicator = VoiceIndicator()
     private let wakeSampleRecorder = WakeWordSampleRecorder()
+    private lazy var wakeWordListener = WakeWordListener(meter: indicator.meter)
     private var audioStreamer: LiveAudioStreamer?
     private var audioBuffer: StreamingAudioBuffer?
     private var streamingClient: SarvamStreamingClient?
@@ -35,8 +42,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var latencyStartedAt: Date?
     private var latencyMarks: [String] = []
     private var pollTimer: Timer?
+    private var handsFreeSilenceTimer: Timer?
     private var debugWindow: NSWindow?
     private var debugTextView: NSTextView?
+    private let ignoredTargetBundleIdentifiers: Set<String> = {
+        var identifiers: Set<String> = [
+            "com.apple.controlcenter",
+            "com.apple.systemuiserver"
+        ]
+        if let bundleIdentifier = Bundle.main.bundleIdentifier {
+            identifiers.insert(bundleIdentifier)
+        }
+        return identifiers
+    }()
     private lazy var shortcutState = ShortcutStateMachine(
         startRecording: { [weak self] locked in self?.startRecording(locked: locked) },
         stopRecording: { [weak self] in self?.stopRecording() },
@@ -47,6 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let permissionsMenuItem = NSMenuItem(title: "Permissions: Checking...", action: #selector(checkPermissions), keyEquivalent: "")
     private let hotkeyMenuItem = NSMenuItem(title: "Hotkey Enabled", action: #selector(toggleHotkey), keyEquivalent: "")
     private let livePreviewMenuItem = NSMenuItem(title: "Show Live Preview", action: #selector(toggleLivePreview), keyEquivalent: "")
+    private let handsFreeMenuItem = NSMenuItem(title: "Hands-free Mode", action: #selector(toggleHandsFreeMode), keyEquivalent: "")
+    private let wakeWordListenerMenuItem = NSMenuItem(title: "Listener: Stopped", action: nil, keyEquivalent: "")
     private let wakeWordStatusMenuItem = NSMenuItem(title: "Check Wake Word Setup", action: #selector(checkWakeWordSetup), keyEquivalent: "")
     private let wakeWordSampleCountsMenuItem = NSMenuItem(title: "Samples: Wake 0  Other 0", action: nil, keyEquivalent: "")
     private let shortcutMenu = NSMenu()
@@ -63,6 +83,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         checkPermissions()
         startPolling()
         prepareWarmStreamingClient()
+        if handsFreeModeEnabled {
+            startWakeWordListener()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        stopWakeWordListener()
+        stopHandsFreeSilenceMonitor()
+        pollTimer?.invalidate()
     }
 
     private func configureStatusItem() {
@@ -124,6 +153,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let wakeWordRoot = NSMenuItem(title: "Wake Word", action: nil, keyEquivalent: "")
         let wakeWordMenu = NSMenu()
+        handsFreeMenuItem.target = self
+        handsFreeMenuItem.state = handsFreeModeEnabled ? .on : .off
+        wakeWordMenu.addItem(handsFreeMenuItem)
+        wakeWordListenerMenuItem.isEnabled = false
+        wakeWordMenu.addItem(wakeWordListenerMenuItem)
+        wakeWordMenu.addItem(.separator())
         wakeWordStatusMenuItem.target = self
         wakeWordMenu.addItem(wakeWordStatusMenuItem)
         let openWakeWordFolderItem = NSMenuItem(title: "Open Wake Word Folder", action: #selector(openWakeWordFolder), keyEquivalent: "")
@@ -193,9 +228,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func pollHotkey() {
+        updateLastTargetApp()
         guard hotkeyEnabled else { return }
         let isPressed = ShortcutPoller.isPressed(selectedShortcut)
         shortcutState.update(isPressed: isPressed, now: Date().timeIntervalSinceReferenceDate)
+    }
+
+    private func updateLastTargetApp() {
+        guard activeRecordingID == nil, !wakeSampleRecorder.isRecording else { return }
+        guard let app = PasteHelper.captureFrontmostApp(ignoring: ignoredTargetBundleIdentifiers) else { return }
+        lastTargetApp = preferredTarget(captured: app)
+    }
+
+    private func preferredTarget(captured: TargetApp?) -> TargetApp? {
+        guard let captured else {
+            return lastTargetApp
+        }
+
+        if captured.hasFocusedElement {
+            return captured
+        }
+
+        if let lastTargetApp,
+           lastTargetApp.bundleIdentifier == captured.bundleIdentifier,
+           lastTargetApp.hasFocusedElement {
+            return lastTargetApp
+        }
+
+        return captured
     }
 
     @objc private func toggleHotkey() {
@@ -204,6 +264,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             shortcutState.reset()
         }
         setStatus(hotkeyEnabled ? "Ready" : "Hotkey off")
+        refreshMenu()
+    }
+
+    @objc private func toggleHandsFreeMode() {
+        handsFreeModeEnabled.toggle()
+        AppSettings.saveHandsFreeModeEnabled(handsFreeModeEnabled)
+        if handsFreeModeEnabled {
+            startWakeWordListener()
+        } else {
+            stopWakeWordListener()
+            stopHandsFreeSilenceMonitor()
+        }
+        setStatus(handsFreeModeEnabled ? "Hands-free ready" : "Hands-free off")
         refreshMenu()
     }
 
@@ -372,6 +445,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startRecording(locked: Bool) {
+        guard activeRecordingID == nil else { return }
         guard !wakeSampleRecorder.isRecording else {
             setStatus("Sample recording active")
             return
@@ -387,7 +461,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         applySelectedMicrophoneBeforeRecording()
 
-        targetApp = PasteHelper.captureFrontmostApp()
+        let capturedTarget = PasteHelper.captureFrontmostApp(ignoring: ignoredTargetBundleIdentifiers)
+        targetApp = isHandsFreeRecording ? preferredTarget(captured: capturedTarget) : capturedTarget
+        if let targetApp {
+            lastTargetApp = targetApp
+        }
         latestEnglish = ""
         liveEnglish = ""
         latencyStartedAt = Date()
@@ -396,10 +474,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         didMarkFirstText = false
         let recordingID = UUID()
         activeRecordingID = recordingID
-        markLatency("hotkey down")
+        markLatency(isHandsFreeRecording ? "wake word" : "hotkey down")
         indicator.clearPreview()
         indicator.showRecording()
-        let mode = locked ? "Locked recording" : "Recording"
+        let mode = isHandsFreeRecording ? "Hands-free recording" : locked ? "Locked recording" : "Recording"
         setStatus("\(mode) into \(targetApp?.name ?? "unknown target")")
 
         let buffer = StreamingAudioBuffer()
@@ -486,6 +564,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.indicator.hide()
                     self.setStatus("Streaming error")
                     self.showNotification(title: "Streaming error", body: error.localizedDescription)
+                    self.finishHandsFreeCycleIfNeeded()
                 }
             }
         }
@@ -532,6 +611,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func stopRecording() {
+        guard audioStreamer != nil || streamingClient != nil || audioBuffer != nil else { return }
+        stopHandsFreeSilenceMonitor()
         let streamer = audioStreamer
         let buffer = audioBuffer
         let client = streamingClient
@@ -571,17 +652,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.indicator.hide()
                         self.setStatus("Paste permission needed")
                         self.showNotification(title: "Permission needed", body: "Enable Accessibility for Indic Dictation to paste into other apps.")
+                        self.finishHandsFreeCycleIfNeeded()
                         return
                     }
                     guard !result.text.isEmpty else {
                         self.indicator.hide()
                         self.setStatus("No speech detected")
+                        self.finishHandsFreeCycleIfNeeded()
                         return
                     }
                     self.lastPasteResult = try PasteHelper.paste(result.text, into: targetApp)
                     self.markLatency("paste complete")
                     self.indicator.hide()
                     self.setStatus("Pasted. \(String(format: "%.1f", latency))s")
+                    self.finishHandsFreeCycleIfNeeded()
                 }
             } catch {
                 await MainActor.run {
@@ -589,6 +673,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.indicator.hide()
                     self.setStatus("Error")
                     self.showNotification(title: "Dictation error", body: error.localizedDescription)
+                    self.finishHandsFreeCycleIfNeeded()
                 }
             }
         }
@@ -681,6 +766,105 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return client
     }
 
+    private func startWakeWordListener() {
+        guard handsFreeModeEnabled, activeRecordingID == nil, !wakeSampleRecorder.isRecording, !wakeWordListener.isRunning else {
+            return
+        }
+        guard PermissionManager.microphoneGranted else {
+            setStatus("Microphone permission needed")
+            PermissionManager.requestMicrophone { [weak self] in
+                self?.refreshMenu()
+            }
+            return
+        }
+
+        applySelectedMicrophoneBeforeRecording()
+        do {
+            try wakeWordListener.start { [weak self] confidence in
+                self?.handleWakeWordDetected(confidence: confidence)
+            }
+            setStatus("Hands-free ready")
+        } catch {
+            handsFreeModeEnabled = false
+            AppSettings.saveHandsFreeModeEnabled(false)
+            setStatus("Hands-free unavailable")
+            showNotification(title: "Hands-free unavailable", body: error.localizedDescription)
+        }
+        refreshMenu()
+    }
+
+    private func stopWakeWordListener() {
+        wakeWordListener.stop()
+        refreshMenu()
+    }
+
+    private func handleWakeWordDetected(confidence: Float) {
+        guard handsFreeModeEnabled, activeRecordingID == nil else { return }
+        stopWakeWordListener()
+        setStatus(String(format: "Wake heard %.2f", confidence))
+        indicator.clearPreview()
+        indicator.showRecording()
+        isHandsFreeRecording = true
+        startRecording(locked: true)
+        if activeRecordingID != nil {
+            startHandsFreeSilenceMonitor()
+        } else {
+            finishHandsFreeCycleIfNeeded()
+        }
+    }
+
+    private func startHandsFreeSilenceMonitor() {
+        stopHandsFreeSilenceMonitor()
+        handsFreeStartedAt = Date()
+        handsFreeLastVoiceAt = nil
+        handsFreeSpeechDetected = false
+
+        handsFreeSilenceTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.checkHandsFreeSilence()
+            }
+        }
+    }
+
+    private func stopHandsFreeSilenceMonitor() {
+        handsFreeSilenceTimer?.invalidate()
+        handsFreeSilenceTimer = nil
+    }
+
+    private func checkHandsFreeSilence() {
+        guard isHandsFreeRecording, activeRecordingID != nil, let startedAt = handsFreeStartedAt else { return }
+
+        let now = Date()
+        let elapsed = now.timeIntervalSince(startedAt)
+        let level = indicator.meter.value
+        if level > 0.075 {
+            handsFreeSpeechDetected = true
+            handsFreeLastVoiceAt = now
+            return
+        }
+
+        guard elapsed >= 2.0 else { return }
+
+        if handsFreeSpeechDetected, let handsFreeLastVoiceAt, now.timeIntervalSince(handsFreeLastVoiceAt) >= 1.5 {
+            setStatus("Silence detected")
+            stopRecording()
+        } else if !handsFreeSpeechDetected, elapsed >= 8.0 {
+            setStatus("No speech detected")
+            stopRecording()
+        }
+    }
+
+    private func finishHandsFreeCycleIfNeeded() {
+        guard isHandsFreeRecording else { return }
+        isHandsFreeRecording = false
+        handsFreeSpeechDetected = false
+        handsFreeStartedAt = nil
+        handsFreeLastVoiceAt = nil
+        if handsFreeModeEnabled {
+            startWakeWordListener()
+        }
+    }
+
     private func markLatency(_ label: String) {
         let now = Date()
         if latencyStartedAt == nil {
@@ -705,6 +889,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         permissionsMenuItem.title = "Permissions: \(PermissionManager.compactSummary)"
         hotkeyMenuItem.state = hotkeyEnabled ? .on : .off
         livePreviewMenuItem.state = livePreviewEnabled ? .on : .off
+        handsFreeMenuItem.state = handsFreeModeEnabled ? .on : .off
+        wakeWordListenerMenuItem.title = "Listener: \(wakeWordListener.isRunning ? "Running" : "Stopped")"
         wakeWordStatusMenuItem.title = wakeWordStatus.shortSummary
         wakeWordSampleCountsMenuItem.title = "Samples: \(WakeWordTrainingResources.sampleCounts().menuSummary)"
         for item in shortcutMenu.items {
@@ -837,6 +1023,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         debugTextView.string = """
         Status: \(currentStatus)
         Hotkey: \(hotkeyEnabled ? "Enabled" : "Disabled")
+        Hands-free: \(handsFreeModeEnabled ? "Enabled" : "Disabled")
+        Wake Listener: \(wakeWordListener.isRunning ? "Running" : "Stopped")
         Shortcut: \(selectedShortcut.name)
         Response Mode: \(selectedQualityMode.name)
         Microphone: \(microphoneDebugSummary())

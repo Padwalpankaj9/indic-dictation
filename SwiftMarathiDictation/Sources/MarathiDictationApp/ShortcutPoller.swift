@@ -30,9 +30,15 @@ enum ShortcutPoller {
     }
 }
 
-struct TargetApp {
+struct TargetApp: @unchecked Sendable {
     let name: String
     let bundleIdentifier: String
+    let processIdentifier: pid_t
+    let focusedElement: AXUIElement?
+
+    var hasFocusedElement: Bool {
+        focusedElement != nil
+    }
 }
 
 struct FocusedTargetInfo {
@@ -83,14 +89,24 @@ struct PasteResult {
 }
 
 enum PasteHelper {
-    static func captureFrontmostApp() -> TargetApp? {
+    static func captureFrontmostApp(ignoring ignoredBundleIdentifiers: Set<String> = []) -> TargetApp? {
         guard
             let app = NSWorkspace.shared.frontmostApplication,
             let bundleID = app.bundleIdentifier
         else {
             return nil
         }
-        return TargetApp(name: app.localizedName ?? bundleID, bundleIdentifier: bundleID)
+        guard !ignoredBundleIdentifiers.contains(bundleID) else {
+            return nil
+        }
+
+        let focusedElement = captureFocusedTextElement(processIdentifier: app.processIdentifier)
+        return TargetApp(
+            name: app.localizedName ?? bundleID,
+            bundleIdentifier: bundleID,
+            processIdentifier: app.processIdentifier,
+            focusedElement: focusedElement
+        )
     }
 
     static func focusedTargetInfo() -> FocusedTargetInfo? {
@@ -147,18 +163,22 @@ enum PasteHelper {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
-        if let target, let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: target.bundleIdentifier) {
-            NSWorkspace.shared.openApplication(at: appURL, configuration: NSWorkspace.OpenConfiguration())
-        }
+        activate(target)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            focusStoredElement(in: target)
             let source = CGEventSource(stateID: .hidSystemState)
             let vDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true)
             let vUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
             vDown?.flags = .maskCommand
             vUp?.flags = .maskCommand
-            vDown?.post(tap: .cghidEventTap)
-            vUp?.post(tap: .cghidEventTap)
+            if let target {
+                vDown?.postToPid(target.processIdentifier)
+                vUp?.postToPid(target.processIdentifier)
+            } else {
+                vDown?.post(tap: .cghidEventTap)
+                vUp?.post(tap: .cghidEventTap)
+            }
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 previous.restore(to: .general)
@@ -172,6 +192,73 @@ enum PasteHelper {
             restoredClipboardItems: previousItemCount,
             method: "clipboard + Command-V"
         )
+    }
+
+    private static func activate(_ target: TargetApp?) {
+        guard let target else { return }
+
+        if let app = NSRunningApplication(processIdentifier: target.processIdentifier)
+            ?? NSRunningApplication.runningApplications(withBundleIdentifier: target.bundleIdentifier).first {
+            app.activate(options: [.activateAllWindows])
+            return
+        }
+
+        if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: target.bundleIdentifier) {
+            NSWorkspace.shared.openApplication(at: appURL, configuration: NSWorkspace.OpenConfiguration())
+        }
+    }
+
+    private static func captureFocusedTextElement(processIdentifier: pid_t) -> AXUIElement? {
+        guard PermissionManager.accessibilityGranted else {
+            return nil
+        }
+
+        let appElement = AXUIElementCreateApplication(processIdentifier)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            appElement,
+            kAXFocusedUIElementAttribute as CFString,
+            &value
+        ) == .success else {
+            return nil
+        }
+        guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else {
+            return nil
+        }
+
+        let element = value as! AXUIElement
+        return isTextInputElement(element) ? element : nil
+    }
+
+    private static func focusStoredElement(in target: TargetApp?) {
+        guard let element = target?.focusedElement else { return }
+        AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    }
+
+    private static func isTextInputElement(_ element: AXUIElement) -> Bool {
+        if let role = stringAttribute(kAXRoleAttribute, from: element) {
+            let textRoles: Set<String> = ["AXTextArea", "AXTextField", "AXComboBox", "AXSearchField"]
+            if textRoles.contains(role) {
+                return true
+            }
+        }
+
+        var selectedRange: CFTypeRef?
+        if AXUIElementCopyAttributeValue(
+            element,
+            kAXSelectedTextRangeAttribute as CFString,
+            &selectedRange
+        ) == .success {
+            return true
+        }
+
+        var settable = DarwinBoolean(false)
+        if AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable) == .success,
+           settable.boolValue {
+            return true
+        }
+
+        return false
     }
 
     private static func stringAttribute(_ name: String, from element: AXUIElement) -> String? {

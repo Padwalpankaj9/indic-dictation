@@ -11,6 +11,7 @@ MODEL_DIR="$OUTPUT_DIR/$MODEL_NAME"
 WAKE_DIR="$APP_SUPPORT/WakeWord"
 CONFIG_PATH="$TRAIN_ROOT/${MODEL_NAME}_recorded.yaml"
 LIVEKIT_DIR="$ROOT/.build/checkouts/livekit-wakeword"
+LIVEKIT_SPEC="livekit-wakeword[train,export] @ file://$LIVEKIT_DIR"
 PYTHON_BIN="${PYTHON_BIN:-/usr/local/bin/python3.12}"
 
 count_clips() {
@@ -103,24 +104,21 @@ echo "Using Python: $PYTHON_BIN"
 echo "Config: $CONFIG_PATH"
 
 uv run \
-  --project "$LIVEKIT_DIR" \
+  --no-project \
   --python "$PYTHON_BIN" \
-  --extra train \
-  --extra export \
+  --with "$LIVEKIT_SPEC" \
   livekit-wakeword augment "$CONFIG_PATH"
 
 uv run \
-  --project "$LIVEKIT_DIR" \
+  --no-project \
   --python "$PYTHON_BIN" \
-  --extra train \
-  --extra export \
+  --with "$LIVEKIT_SPEC" \
   livekit-wakeword train "$CONFIG_PATH"
 
 uv run \
-  --project "$LIVEKIT_DIR" \
+  --no-project \
   --python "$PYTHON_BIN" \
-  --extra train \
-  --extra export \
+  --with "$LIVEKIT_SPEC" \
   livekit-wakeword export "$CONFIG_PATH"
 
 cp "$MODEL_DIR/$MODEL_NAME.onnx" "$WAKE_DIR/$MODEL_NAME.onnx"
