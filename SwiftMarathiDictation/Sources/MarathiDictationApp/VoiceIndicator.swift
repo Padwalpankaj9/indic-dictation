@@ -30,15 +30,7 @@ final class VoiceIndicator {
     init() {
         model = IndicatorModel(meter: meter)
 
-        let screen = NSScreen.main?.visibleFrame ?? .zero
-        let width = min(screen.width - 64, 720)
-        let height: CGFloat = 220
-        let rect = NSRect(
-            x: screen.midX - width / 2,
-            y: screen.minY,
-            width: width,
-            height: height
-        )
+        let rect = Self.windowFrame(for: Self.targetScreen())
 
         let hosting = NSHostingView(rootView: IndicatorRoot(model: model))
         hosting.frame = NSRect(origin: .zero, size: rect.size)
@@ -59,12 +51,14 @@ final class VoiceIndicator {
         // Note: does NOT touch the text. START_SPEECH calls this repeatedly,
         // and clearing here is what made the preview flicker.
         model.state = .recording
+        moveToActiveScreen()
         window.orderFrontRegardless()
     }
 
     func showProcessing() {
         // Keep the text visible through finalizing so it never blinks away.
         model.state = .processing
+        moveToActiveScreen()
         window.orderFrontRegardless()
     }
 
@@ -89,6 +83,38 @@ final class VoiceIndicator {
         window.orderOut(nil)
         model.previewText = ""
         meter.reset()
+    }
+
+    private func moveToActiveScreen() {
+        window.setFrame(Self.windowFrame(for: Self.targetScreen()), display: true)
+    }
+
+    private static func targetScreen() -> NSScreen {
+        let mouseLocation = NSEvent.mouseLocation
+        if let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) {
+            return screen
+        }
+        return NSScreen.screens.min { lhs, rhs in
+            distanceSquared(from: mouseLocation, to: lhs.frame) < distanceSquared(from: mouseLocation, to: rhs.frame)
+        } ?? NSScreen.main!
+    }
+
+    private static func windowFrame(for screen: NSScreen) -> NSRect {
+        let visibleFrame = screen.visibleFrame
+        let width = min(max(visibleFrame.width - 64, 320), 720)
+        let height: CGFloat = 220
+        return NSRect(
+            x: visibleFrame.midX - width / 2,
+            y: visibleFrame.minY,
+            width: width,
+            height: height
+        )
+    }
+
+    private static func distanceSquared(from point: NSPoint, to rect: NSRect) -> CGFloat {
+        let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
+        let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
+        return dx * dx + dy * dy
     }
 }
 
