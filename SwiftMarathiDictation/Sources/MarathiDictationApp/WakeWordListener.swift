@@ -38,12 +38,13 @@ final class WakeWordListener: @unchecked Sendable {
     }
 
     func start(
+        threshold: Float,
         onScore: @escaping ScoreHandler,
         onWake: @escaping WakeHandler
     ) throws {
         stop()
 
-        let engine = LiveKitWakeWordEngine()
+        let engine = LiveKitWakeWordEngine(threshold: threshold)
         try engine.start()
 
         wakeEngine = engine

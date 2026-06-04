@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyEnabled = true
     private var livePreviewEnabled = AppSettings.loadLivePreviewEnabled()
     private var handsFreeModeEnabled = AppSettings.loadHandsFreeModeEnabled()
+    private var wakeWordSensitivity = AppSettings.loadWakeWordSensitivity()
     private var isHandsFreeRecording = false
     private var handsFreeSpeechDetected = false
     private var handsFreeStartedAt: Date?
@@ -72,11 +73,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let handsFreeMenuItem = NSMenuItem(title: "Hands-free Mode", action: #selector(toggleHandsFreeMode), keyEquivalent: "")
     private let wakeWordListenerMenuItem = NSMenuItem(title: "Listener: Stopped", action: nil, keyEquivalent: "")
     private let wakeWordConfidenceMenuItem = NSMenuItem(title: "Confidence: --", action: nil, keyEquivalent: "")
+    private let wakeWordSensitivityMenuItem = NSMenuItem(title: "Sensitivity: 0.50", action: nil, keyEquivalent: "")
     private let markFalseWakeMenuItem = NSMenuItem(title: "Mark Last Wake as False Trigger", action: #selector(markLastWakeAsFalseTrigger), keyEquivalent: "")
     private let wakeWordStatusMenuItem = NSMenuItem(title: "Check Wake Word Setup", action: #selector(checkWakeWordSetup), keyEquivalent: "")
     private let wakeWordSampleCountsMenuItem = NSMenuItem(title: "Samples: Wake 0  Other 0", action: nil, keyEquivalent: "")
     private let shortcutMenu = NSMenu()
     private let microphoneMenu = NSMenu()
+    private lazy var wakeWordSensitivitySlider: NSSlider = {
+        let slider = NSSlider(
+            value: wakeWordSensitivity,
+            minValue: 0.0,
+            maxValue: 1.0,
+            target: self,
+            action: #selector(changeWakeWordSensitivity(_:))
+        )
+        slider.isContinuous = false
+        slider.numberOfTickMarks = 11
+        slider.allowsTickMarkValuesOnly = false
+        slider.controlSize = .small
+        slider.toolTip = "Lower is stricter. Higher wakes more easily."
+        return slider
+    }()
+    private lazy var wakeWordSensitivitySliderItem: NSMenuItem = {
+        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 34))
+        wakeWordSensitivitySlider.frame = NSRect(x: 14, y: 7, width: 192, height: 18)
+        view.addSubview(wakeWordSensitivitySlider)
+        item.view = view
+        return item
+    }()
+
+    private var wakeWordThreshold: Float {
+        Float(1.0 - wakeWordSensitivity)
+    }
 
     deinit {
         NSLog("Indic Dictation: AppDelegate deinit")
@@ -166,6 +195,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wakeWordMenu.addItem(wakeWordListenerMenuItem)
         wakeWordConfidenceMenuItem.isEnabled = false
         wakeWordMenu.addItem(wakeWordConfidenceMenuItem)
+        wakeWordSensitivityMenuItem.isEnabled = false
+        wakeWordMenu.addItem(wakeWordSensitivityMenuItem)
+        wakeWordMenu.addItem(wakeWordSensitivitySliderItem)
         markFalseWakeMenuItem.target = self
         wakeWordMenu.addItem(markFalseWakeMenuItem)
         wakeWordMenu.addItem(.separator())
@@ -298,6 +330,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             stopHandsFreeSilenceMonitor()
         }
         setStatus(handsFreeModeEnabled ? "Hands-free ready" : "Hands-free off")
+        refreshMenu()
+    }
+
+    @objc private func changeWakeWordSensitivity(_ sender: NSSlider) {
+        wakeWordSensitivity = min(1.0, max(0.0, sender.doubleValue))
+        AppSettings.saveWakeWordSensitivity(wakeWordSensitivity)
+
+        let shouldRestartListener = wakeWordListener.isRunning
+        if shouldRestartListener {
+            stopWakeWordListener()
+            startWakeWordListener()
+        }
+        setStatus(String(format: "Wake sensitivity %.2f", wakeWordSensitivity))
         refreshMenu()
     }
 
@@ -823,6 +868,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applySelectedMicrophoneBeforeRecording()
         do {
             try wakeWordListener.start(
+                threshold: wakeWordThreshold,
                 onScore: { [weak self] confidence, streak in
                     self?.updateWakeScore(confidence: confidence, streak: streak)
                 },
@@ -957,6 +1003,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             wakeWordConfidenceMenuItem.title = "Confidence: --"
         }
+        wakeWordSensitivityMenuItem.title = String(
+            format: "Sensitivity: %.2f  Threshold: %.2f",
+            wakeWordSensitivity,
+            wakeWordThreshold
+        )
+        wakeWordSensitivitySlider.doubleValue = wakeWordSensitivity
         markFalseWakeMenuItem.isEnabled = lastWakeTriggerSamples != nil
         wakeWordStatusMenuItem.title = wakeWordStatus.shortSummary
         wakeWordSampleCountsMenuItem.title = "Samples: \(WakeWordTrainingResources.sampleCounts().menuSummary)"
@@ -1092,6 +1144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Hotkey: \(hotkeyEnabled ? "Enabled" : "Disabled")
         Hands-free: \(handsFreeModeEnabled ? "Enabled" : "Disabled")
         Wake Listener: \(wakeWordListener.isRunning ? "Running" : "Stopped")
+        Wake Sensitivity: \(String(format: "%.2f", wakeWordSensitivity)) (threshold \(String(format: "%.2f", wakeWordThreshold)))
         Shortcut: \(selectedShortcut.name)
         Response Mode: \(selectedQualityMode.name)
         Microphone: \(microphoneDebugSummary())

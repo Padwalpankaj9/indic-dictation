@@ -87,6 +87,8 @@ enum AppSettings {
     private static let livePreviewKey = "livePreviewEnabled"
     private static let handsFreeModeKey = "handsFreeModeEnabled"
     private static let selectedMicrophoneUIDKey = "selectedMicrophoneUID"
+    private static let wakeWordSensitivityKey = "wakeWordSensitivity"
+    static let defaultWakeWordSensitivity = 0.50
 
     static let presets: [ShortcutPreset] = [
         ShortcutPreset(name: "Command + Option", modifiers: [.command, .option]),
@@ -147,6 +149,17 @@ enum AppSettings {
         UserDefaults.standard.set(enabled, forKey: handsFreeModeKey)
     }
 
+    static func loadWakeWordSensitivity() -> Double {
+        guard UserDefaults.standard.object(forKey: wakeWordSensitivityKey) != nil else {
+            return defaultWakeWordSensitivity
+        }
+        return clampedSensitivity(UserDefaults.standard.double(forKey: wakeWordSensitivityKey))
+    }
+
+    static func saveWakeWordSensitivity(_ sensitivity: Double) {
+        UserDefaults.standard.set(clampedSensitivity(sensitivity), forKey: wakeWordSensitivityKey)
+    }
+
     static func loadSelectedMicrophoneUID() -> String? {
         guard let uid = UserDefaults.standard.string(forKey: selectedMicrophoneUIDKey),
               !uid.isEmpty else {
@@ -161,6 +174,10 @@ enum AppSettings {
             return
         }
         UserDefaults.standard.set(uid, forKey: selectedMicrophoneUIDKey)
+    }
+
+    private static func clampedSensitivity(_ sensitivity: Double) -> Double {
+        min(1.0, max(0.0, sensitivity))
     }
 
     private static var readableSettingsURL: URL {

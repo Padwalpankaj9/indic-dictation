@@ -46,7 +46,7 @@ final class LiveKitWakeWordEngine: WakeWordEngine {
     private let threshold: Float
     private var model: WakeWordModel?
 
-    init(threshold: Float = 0.54) {
+    init(threshold: Float = 0.50) {
         self.threshold = threshold
     }
 
