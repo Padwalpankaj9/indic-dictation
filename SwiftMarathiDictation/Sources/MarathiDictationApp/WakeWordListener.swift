@@ -15,7 +15,7 @@ enum WakeWordListenerError: Error, LocalizedError {
 final class WakeWordListener: @unchecked Sendable {
     typealias WakeHandler = @MainActor @Sendable (_ confidence: Float) -> Void
 
-    private let requiredConsecutiveDetections = 3
+    private let requiredConsecutiveDetections = 2
     private let meter: AudioLevelMeter
     private let processingQueue = DispatchQueue(label: "com.indic-dictation.wake-word-listener")
     private var wakeEngine: WakeWordEngine?
