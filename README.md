@@ -120,6 +120,22 @@ hey_vaani.onnx
 
 Use the menu bar's Wake Word section to open the folder and check setup status. The classifier model can be trained or exported later using LiveKit WakeWord or compatible openWakeWord tooling.
 
+To collect real voice samples from the menu bar:
+
+1. Open **Wake Word**.
+2. Click **Record Wake Sample**, then say `Hey Vaani`.
+3. Click **Record Other Speech Sample**, then say anything except `Hey Vaani`.
+4. Repeat until you have at least 10 wake samples and 10 other speech samples. For a better model, collect 50+ of each.
+
+Every fifth sample is automatically held out as a test sample. Once samples are collected:
+
+```bash
+cd SwiftMarathiDictation
+./scripts/train_wakeword_from_samples.sh
+```
+
+The script trains a local `hey_vaani.onnx` model from your recordings and installs it into the Wake Word folder.
+
 ## macOS permissions
 
 The installed Swift app needs these macOS permissions:

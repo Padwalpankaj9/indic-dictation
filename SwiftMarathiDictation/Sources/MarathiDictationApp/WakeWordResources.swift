@@ -29,6 +29,125 @@ enum WakeWordResources {
     }
 }
 
+enum WakeWordSampleKind {
+    case wake
+    case negative
+
+    var prompt: String {
+        switch self {
+        case .wake:
+            return "Say \"Hey Vaani\""
+        case .negative:
+            return "Say anything except \"Hey Vaani\""
+        }
+    }
+}
+
+enum WakeWordSampleSplit: String, CaseIterable {
+    case positiveTrain = "positive_train"
+    case positiveTest = "positive_test"
+    case negativeTrain = "negative_train"
+    case negativeTest = "negative_test"
+}
+
+struct WakeWordSampleCounts {
+    let positiveTrain: Int
+    let positiveTest: Int
+    let negativeTrain: Int
+    let negativeTest: Int
+
+    var positiveTotal: Int {
+        positiveTrain + positiveTest
+    }
+
+    var negativeTotal: Int {
+        negativeTrain + negativeTest
+    }
+
+    var menuSummary: String {
+        "Wake \(positiveTotal)  Other \(negativeTotal)"
+    }
+
+    var debugSummary: String {
+        """
+        Wake samples: \(positiveTotal) (\(positiveTrain) train, \(positiveTest) test)
+        Other samples: \(negativeTotal) (\(negativeTrain) train, \(negativeTest) test)
+        """
+    }
+}
+
+enum WakeWordTrainingResources {
+    static let modelName = "hey_vaani"
+    static let trainingRoot = AppPaths.appSupport.appendingPathComponent("WakeWordTraining")
+    static let dataDir = trainingRoot.appendingPathComponent("data")
+    static let outputDir = trainingRoot.appendingPathComponent("output")
+    static let modelOutputDir = outputDir.appendingPathComponent(modelName)
+
+    static func openDirectory() throws {
+        try ensureDirectories()
+        NSWorkspace.shared.open(modelOutputDir)
+    }
+
+    static func ensureDirectories() throws {
+        for split in WakeWordSampleSplit.allCases {
+            try FileManager.default.createDirectory(
+                at: directory(for: split),
+                withIntermediateDirectories: true
+            )
+        }
+        try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
+        try WakeWordResources.ensureDirectory()
+    }
+
+    static func nextSampleURL(for kind: WakeWordSampleKind) throws -> (split: WakeWordSampleSplit, url: URL) {
+        try ensureDirectories()
+        let split = nextSplit(for: kind)
+        let index = originalClipCount(in: directory(for: split))
+        let fileName = String(format: "clip_%06d.wav", index)
+        return (split, directory(for: split).appendingPathComponent(fileName))
+    }
+
+    static func sampleCounts() -> WakeWordSampleCounts {
+        WakeWordSampleCounts(
+            positiveTrain: originalClipCount(in: directory(for: .positiveTrain)),
+            positiveTest: originalClipCount(in: directory(for: .positiveTest)),
+            negativeTrain: originalClipCount(in: directory(for: .negativeTrain)),
+            negativeTest: originalClipCount(in: directory(for: .negativeTest))
+        )
+    }
+
+    static func directory(for split: WakeWordSampleSplit) -> URL {
+        modelOutputDir.appendingPathComponent(split.rawValue)
+    }
+
+    private static func nextSplit(for kind: WakeWordSampleKind) -> WakeWordSampleSplit {
+        let counts = sampleCounts()
+        switch kind {
+        case .wake:
+            return counts.positiveTotal % 5 == 4 ? .positiveTest : .positiveTrain
+        case .negative:
+            return counts.negativeTotal % 5 == 4 ? .negativeTest : .negativeTrain
+        }
+    }
+
+    private static func originalClipCount(in directory: URL) -> Int {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else {
+            return 0
+        }
+
+        return files.filter { url in
+            url.pathExtension == "wav"
+                && url.deletingPathExtension().lastPathComponent.range(
+                    of: #"^clip_\d{6}$"#,
+                    options: .regularExpression
+                ) != nil
+        }.count
+    }
+}
+
 struct WakeWordSetupStatus {
     let directory: URL
     let missingItems: [String]

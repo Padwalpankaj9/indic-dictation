@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let recorder = AudioRecorder()
     private let indicator = VoiceIndicator()
+    private let wakeSampleRecorder = WakeWordSampleRecorder()
     private var audioStreamer: LiveAudioStreamer?
     private var audioBuffer: StreamingAudioBuffer?
     private var streamingClient: SarvamStreamingClient?
@@ -47,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotkeyMenuItem = NSMenuItem(title: "Hotkey Enabled", action: #selector(toggleHotkey), keyEquivalent: "")
     private let livePreviewMenuItem = NSMenuItem(title: "Show Live Preview", action: #selector(toggleLivePreview), keyEquivalent: "")
     private let wakeWordStatusMenuItem = NSMenuItem(title: "Check Wake Word Setup", action: #selector(checkWakeWordSetup), keyEquivalent: "")
+    private let wakeWordSampleCountsMenuItem = NSMenuItem(title: "Samples: Wake 0  Other 0", action: nil, keyEquivalent: "")
     private let shortcutMenu = NSMenu()
     private let microphoneMenu = NSMenu()
 
@@ -127,6 +129,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let openWakeWordFolderItem = NSMenuItem(title: "Open Wake Word Folder", action: #selector(openWakeWordFolder), keyEquivalent: "")
         openWakeWordFolderItem.target = self
         wakeWordMenu.addItem(openWakeWordFolderItem)
+        wakeWordMenu.addItem(.separator())
+        wakeWordSampleCountsMenuItem.isEnabled = false
+        wakeWordMenu.addItem(wakeWordSampleCountsMenuItem)
+        let recordWakeSampleItem = NSMenuItem(title: "Record Wake Sample", action: #selector(recordWakeWordSample), keyEquivalent: "")
+        recordWakeSampleItem.target = self
+        wakeWordMenu.addItem(recordWakeSampleItem)
+        let recordNegativeSampleItem = NSMenuItem(title: "Record Other Speech Sample", action: #selector(recordNegativeWakeWordSample), keyEquivalent: "")
+        recordNegativeSampleItem.target = self
+        wakeWordMenu.addItem(recordNegativeSampleItem)
+        let openTrainingFolderItem = NSMenuItem(title: "Open Training Samples Folder", action: #selector(openWakeWordTrainingFolder), keyEquivalent: "")
+        openTrainingFolderItem.target = self
+        wakeWordMenu.addItem(openTrainingFolderItem)
         wakeWordRoot.submenu = wakeWordMenu
         menu.addItem(wakeWordRoot)
 
@@ -305,6 +319,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateDebugWindow()
     }
 
+    @objc private func recordWakeWordSample() {
+        recordWakeWordTrainingSample(kind: .wake)
+    }
+
+    @objc private func recordNegativeWakeWordSample() {
+        recordWakeWordTrainingSample(kind: .negative)
+    }
+
+    @objc private func openWakeWordTrainingFolder() {
+        do {
+            try WakeWordTrainingResources.openDirectory()
+            setStatus("Opened training folder")
+        } catch {
+            setStatus("Could not open folder")
+            showNotification(title: "Training folder error", body: error.localizedDescription)
+        }
+        refreshMenu()
+    }
+
     @objc private func checkPermissions() {
         PermissionManager.requestInitialPrompts { [weak self] in
             self?.refreshMenu()
@@ -339,6 +372,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startRecording(locked: Bool) {
+        guard !wakeSampleRecorder.isRecording else {
+            setStatus("Sample recording active")
+            return
+        }
+
         guard PermissionManager.microphoneGranted else {
             setStatus("Microphone permission needed")
             PermissionManager.requestMicrophone { [weak self] in
@@ -451,6 +489,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    private func recordWakeWordTrainingSample(kind: WakeWordSampleKind) {
+        guard audioStreamer == nil, activeRecordingID == nil else {
+            setStatus("Finish dictation first")
+            return
+        }
+
+        guard PermissionManager.microphoneGranted else {
+            setStatus("Microphone permission needed")
+            PermissionManager.requestMicrophone { [weak self] in
+                self?.refreshMenu()
+            }
+            return
+        }
+
+        do {
+            indicator.clearPreview()
+            indicator.setPreview(kind.prompt)
+            indicator.showRecording()
+            let split = try wakeSampleRecorder.record(kind: kind) { [weak self] result in
+                guard let self else { return }
+                self.indicator.hide()
+                switch result {
+                case let .success(url):
+                    self.setStatus("Saved sample: \(url.lastPathComponent)")
+                    self.showNotification(title: "Wake sample saved", body: url.lastPathComponent)
+                case let .failure(error):
+                    self.setStatus("Sample failed")
+                    self.showNotification(title: "Sample recording failed", body: error.localizedDescription)
+                }
+                self.refreshMenu()
+            }
+            setStatus("Recording \(split.rawValue). \(kind.prompt)")
+        } catch {
+            indicator.hide()
+            setStatus("Sample failed")
+            showNotification(title: "Sample recording failed", body: error.localizedDescription)
+        }
+        refreshMenu()
     }
 
     private func stopRecording() {
@@ -628,6 +706,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyMenuItem.state = hotkeyEnabled ? .on : .off
         livePreviewMenuItem.state = livePreviewEnabled ? .on : .off
         wakeWordStatusMenuItem.title = wakeWordStatus.shortSummary
+        wakeWordSampleCountsMenuItem.title = "Samples: \(WakeWordTrainingResources.sampleCounts().menuSummary)"
         for item in shortcutMenu.items {
             item.state = item.title == selectedShortcut.name ? .on : .off
         }
@@ -754,6 +833,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let latency = latencyMarks.isEmpty ? "(none)" : latencyMarks.joined(separator: "\n")
         let focused = lastFocusedTarget?.summary ?? "(none)"
         let paste = lastPasteResult?.summary ?? "(none)"
+        let samples = WakeWordTrainingResources.sampleCounts().debugSummary
         debugTextView.string = """
         Status: \(currentStatus)
         Hotkey: \(hotkeyEnabled ? "Enabled" : "Disabled")
@@ -767,6 +847,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Wake Word:
         \(wakeWordStatus.detailedSummary)
+
+        Wake Word Samples:
+        \(samples)
 
         Focused Target:
         \(focused)
