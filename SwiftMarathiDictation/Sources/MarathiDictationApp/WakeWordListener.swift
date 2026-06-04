@@ -15,6 +15,7 @@ enum WakeWordListenerError: Error, LocalizedError {
 final class WakeWordListener: @unchecked Sendable {
     typealias WakeHandler = @MainActor @Sendable (_ confidence: Float) -> Void
 
+    private let requiredConsecutiveDetections = 3
     private let meter: AudioLevelMeter
     private let processingQueue = DispatchQueue(label: "com.indic-dictation.wake-word-listener")
     private var wakeEngine: WakeWordEngine?
@@ -23,6 +24,7 @@ final class WakeWordListener: @unchecked Sendable {
     private var onWake: WakeHandler?
     private var isProcessingWindow = false
     private var didDetectWake = false
+    private var consecutiveDetections = 0
 
     init(meter: AudioLevelMeter) {
         self.meter = meter
@@ -43,6 +45,7 @@ final class WakeWordListener: @unchecked Sendable {
         self.onWake = onWake
         didDetectWake = false
         isProcessingWindow = false
+        consecutiveDetections = 0
 
         let streamer = LiveAudioStreamer(meter: meter) { [weak self] data in
             self?.processAudio(data)
@@ -67,6 +70,7 @@ final class WakeWordListener: @unchecked Sendable {
             onWake = nil
             isProcessingWindow = false
             didDetectWake = false
+            consecutiveDetections = 0
         }
     }
 
@@ -84,13 +88,17 @@ final class WakeWordListener: @unchecked Sendable {
 
             switch detection {
             case let .success(.detected(_, confidence)):
+                consecutiveDetections += 1
+                guard consecutiveDetections >= requiredConsecutiveDetections else { return }
                 didDetectWake = true
                 let handler = onWake
                 Task { @MainActor in
                     handler?(confidence)
                 }
-            case .success(.none), .failure:
-                break
+            case .success(.none):
+                consecutiveDetections = 0
+            case .failure:
+                consecutiveDetections = 0
             }
         }
     }
