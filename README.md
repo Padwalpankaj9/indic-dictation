@@ -29,7 +29,14 @@ Indic Dictation is early but usable. The native macOS app supports low-latency M
 
 ## Setup
 
-The app expects `SARVAM_API_KEY` to be available in the shell environment or in this local file:
+Normal app users can add their Sarvam API key from the menu bar:
+
+1. Open `Indic Dictation`.
+2. Choose `API Key: Needed...` from the menu bar item.
+3. Paste your Sarvam API key.
+4. Click `Save Key`.
+
+The key is stored in macOS Keychain. Developer builds can still use `SARVAM_API_KEY` from the shell environment or this local file:
 
 ```bash
 ~/.config/shell/secrets.env
@@ -164,7 +171,8 @@ The menu bar app shows a permission summary and has direct links to the relevant
 
 - Audio is captured locally and streamed to Sarvam for speech-to-text translation.
 - Final English text is inserted into the currently focused app on your Mac.
-- API keys are read from the local environment or `~/.config/shell/secrets.env`.
+- Normal app users store their Sarvam API key in macOS Keychain.
+- Developer builds can also read `SARVAM_API_KEY` from the local environment or `~/.config/shell/secrets.env`.
 - API keys, recordings, generated responses, app bundles, build outputs, and local settings are excluded from git.
 - Do not commit personal recordings or real API keys.
 

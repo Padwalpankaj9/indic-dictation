@@ -91,6 +91,10 @@ final class SarvamClient {
     }
 
     static func loadAPIKey() throws -> String {
+        if let key = try SarvamAPIKeyStore.loadKey(), !key.isEmpty {
+            return key
+        }
+
         if let key = ProcessInfo.processInfo.environment["SARVAM_API_KEY"], !key.isEmpty {
             return key
         }
@@ -108,6 +112,10 @@ final class SarvamClient {
             return raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
         }
         throw SarvamClientError.missingAPIKey
+    }
+
+    static func hasConfiguredAPIKey() -> Bool {
+        (try? loadAPIKey()) != nil
     }
 
     private func audioDuration(_ url: URL) throws -> TimeInterval {

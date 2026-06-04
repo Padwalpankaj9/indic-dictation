@@ -54,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var handsFreeSilenceTimer: Timer?
     private var debugWindow: NSWindow?
     private var debugTextView: NSTextView?
+    private var isShowingAPIKeyWindow = false
     private let ignoredTargetBundleIdentifiers: Set<String> = {
         var identifiers: Set<String> = [
             "com.apple.controlcenter",
@@ -72,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let statusMenuItem = NSMenuItem(title: "Status: Ready", action: nil, keyEquivalent: "")
     private let permissionsMenuItem = NSMenuItem(title: "Permissions: Checking...", action: #selector(checkPermissions), keyEquivalent: "")
+    private let apiKeyMenuItem = NSMenuItem(title: "API Key...", action: #selector(showAPIKeySettings), keyEquivalent: "")
     private let hotkeyMenuItem = NSMenuItem(title: "Hotkey Enabled", action: #selector(toggleHotkey), keyEquivalent: "")
     private let livePreviewMenuItem = NSMenuItem(title: "Show Live Preview", action: #selector(toggleLivePreview), keyEquivalent: "")
     private let handsFreeMenuItem = NSMenuItem(title: "Hands-free Mode", action: #selector(toggleHandsFreeMode), keyEquivalent: "")
@@ -117,8 +119,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         requestNotificationPermission()
         checkPermissions()
         startPolling()
-        prepareWarmStreamingClient()
-        if handsFreeModeEnabled {
+        let hasAPIKey = SarvamClient.hasConfiguredAPIKey()
+        if hasAPIKey {
+            prepareWarmStreamingClient()
+        } else {
+            setStatus("API key needed")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                self?.showAPIKeySetupIfNeeded()
+            }
+        }
+        if hasAPIKey, handsFreeModeEnabled {
             startWakeWordListener()
         }
     }
@@ -153,6 +163,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(statusMenuItem)
         permissionsMenuItem.target = self
         menu.addItem(permissionsMenuItem)
+        apiKeyMenuItem.target = self
+        menu.addItem(apiKeyMenuItem)
         menu.addItem(.separator())
 
         handsFreeMenuItem.target = self
@@ -280,6 +292,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             stopHandsFreeIdleMonitor()
         }
         setStatus(handsFreeModeEnabled ? "Hands-free ready" : "Hands-free off")
+        refreshMenu()
+    }
+
+    @objc private func showAPIKeySettings() {
+        showAPIKeyWindow(isFirstRun: false)
+    }
+
+    private func showAPIKeySetupIfNeeded() {
+        guard !SarvamClient.hasConfiguredAPIKey() else { return }
+        showAPIKeyWindow(isFirstRun: true)
+    }
+
+    private func showAPIKeyWindow(isFirstRun: Bool) {
+        guard !isShowingAPIKeyWindow else { return }
+        isShowingAPIKeyWindow = true
+        defer { isShowingAPIKeyWindow = false }
+
+        NSApp.activate(ignoringOtherApps: true)
+
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        field.placeholderString = "Paste your Sarvam API key"
+        field.focusRingType = .default
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = isFirstRun ? "Set Up Sarvam API Key" : "Sarvam API Key"
+        alert.informativeText = """
+        Indic Dictation calls Sarvam directly from your Mac. Paste your own Sarvam API key here. It will be stored securely in macOS Keychain.
+        """
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save Key")
+        alert.addButton(withTitle: isFirstRun ? "Later" : "Cancel")
+
+        alert.window.initialFirstResponder = field
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else {
+            if isFirstRun {
+                setStatus("API key needed")
+            }
+            return
+        }
+
+        let key = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            setStatus("API key needed")
+            showNotification(title: "API key needed", body: "Paste a Sarvam API key before using dictation.")
+            return
+        }
+
+        do {
+            try SarvamAPIKeyStore.saveKey(key)
+            setStatus("API key saved")
+            showNotification(title: "API key saved", body: "Indic Dictation will use this key for Sarvam requests.")
+            prepareWarmStreamingClient()
+        } catch {
+            setStatus("API key save failed")
+            showNotification(title: "Could not save API key", body: error.localizedDescription)
+        }
         refreshMenu()
     }
 
@@ -442,6 +512,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard activeRecordingID == nil else { return }
         guard !wakeSampleRecorder.isRecording else {
             setStatus("Sample recording active")
+            return
+        }
+
+        guard SarvamClient.hasConfiguredAPIKey() else {
+            setStatus("API key needed")
+            showAPIKeyWindow(isFirstRun: true)
             return
         }
 
@@ -726,6 +802,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func prepareWarmStreamingClient() {
+        guard SarvamClient.hasConfiguredAPIKey() else { return }
         guard warmStreamingClient == nil, !isPreparingWarmClient else { return }
         isPreparingWarmClient = true
         let qualityMode = selectedQualityMode
@@ -954,6 +1031,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wakeWordStatus = WakeWordResources.setupStatus()
         permissionsMenuItem.title = "Permissions: \(PermissionManager.compactSummary)"
         permissionsMenuItem.isHidden = PermissionManager.allRequiredGranted
+        apiKeyMenuItem.title = SarvamClient.hasConfiguredAPIKey() ? "API Key: Set..." : "API Key: Needed..."
         hotkeyMenuItem.state = hotkeyEnabled ? .on : .off
         livePreviewMenuItem.state = livePreviewEnabled ? .on : .off
         handsFreeMenuItem.state = handsFreeModeEnabled ? .on : .off
