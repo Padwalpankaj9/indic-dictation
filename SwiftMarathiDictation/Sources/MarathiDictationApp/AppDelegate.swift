@@ -19,6 +19,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var handsFreeStartedAt: Date?
     private var handsFreeLastVoiceAt: Date?
     private var handsFreeStopShortcutWasPressed = false
+    private let handsFreeIdleTimeout: TimeInterval = 10 * 60
+    private let handsFreeIdleVoiceLevelThreshold: Float = 0.075
+    private var handsFreeIdleTimer: Timer?
+    private var handsFreeIdleLastActivityAt: Date?
     private var targetApp: TargetApp?
     private var lastTargetApp: TargetApp?
     private var lastFocusedTarget: FocusedTargetInfo?
@@ -122,6 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         stopWakeWordListener()
         stopHandsFreeSilenceMonitor()
+        stopHandsFreeIdleMonitor()
         pollTimer?.invalidate()
     }
 
@@ -272,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             stopWakeWordListener()
             stopHandsFreeSilenceMonitor()
+            stopHandsFreeIdleMonitor()
         }
         setStatus(handsFreeModeEnabled ? "Hands-free ready" : "Hands-free off")
         refreshMenu()
@@ -777,10 +783,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.handleWakeWordDetected(confidence: confidence, samples: samples)
                 }
             )
+            startHandsFreeIdleMonitor()
             setStatus("Hands-free ready")
         } catch {
             handsFreeModeEnabled = false
             AppSettings.saveHandsFreeModeEnabled(false)
+            stopHandsFreeIdleMonitor()
             setStatus("Hands-free unavailable")
             showNotification(title: "Hands-free unavailable", body: error.localizedDescription)
         }
@@ -798,6 +806,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func stopWakeWordListener() {
         wakeWordListener.stop()
+        stopHandsFreeIdleMonitor()
         refreshMenu()
     }
 
@@ -871,6 +880,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if handsFreeModeEnabled {
             startWakeWordListener()
         }
+    }
+
+    private func startHandsFreeIdleMonitor() {
+        stopHandsFreeIdleMonitor()
+        handsFreeIdleLastActivityAt = Date()
+        handsFreeIdleTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.checkHandsFreeIdleTimeout()
+            }
+        }
+    }
+
+    private func stopHandsFreeIdleMonitor() {
+        handsFreeIdleTimer?.invalidate()
+        handsFreeIdleTimer = nil
+        handsFreeIdleLastActivityAt = nil
+    }
+
+    private func checkHandsFreeIdleTimeout() {
+        guard handsFreeModeEnabled, wakeWordListener.isRunning, activeRecordingID == nil else { return }
+
+        let now = Date()
+        if indicator.meter.value > handsFreeIdleVoiceLevelThreshold {
+            handsFreeIdleLastActivityAt = now
+            return
+        }
+
+        guard let lastActivity = handsFreeIdleLastActivityAt else {
+            handsFreeIdleLastActivityAt = now
+            return
+        }
+        guard now.timeIntervalSince(lastActivity) >= handsFreeIdleTimeout else { return }
+
+        pauseHandsFreeAfterIdleTimeout()
+    }
+
+    private func pauseHandsFreeAfterIdleTimeout() {
+        guard handsFreeModeEnabled else { return }
+
+        handsFreeModeEnabled = false
+        AppSettings.saveHandsFreeModeEnabled(false)
+        stopWakeWordListener()
+        stopHandsFreeSilenceMonitor()
+        setStatus("Hands-free slept after 10m idle")
+        showNotification(
+            title: "Hands-free paused",
+            body: "No voice activity for 10 minutes. Turn Hands-free Mode back on from the menu when you need it."
+        )
+        refreshMenu()
     }
 
     private func markLatency(_ label: String) {
