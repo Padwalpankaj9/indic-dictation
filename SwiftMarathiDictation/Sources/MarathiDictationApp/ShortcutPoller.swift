@@ -73,8 +73,8 @@ struct PasteResult {
     let target: TargetApp?
     let focusedTarget: FocusedTargetInfo?
     let textLength: Int
+    let restoredClipboardItems: Int
     let method: String
-    let usedClipboard: Bool
 
     var summary: String {
         [
@@ -83,7 +83,7 @@ struct PasteResult {
             "Focused app: \(focusedTarget?.appName ?? "(unknown)")",
             "Focused role: \(focusedTarget?.role ?? "(unknown)")",
             "Text length: \(textLength)",
-            "Clipboard used: \(usedClipboard ? "yes" : "no")"
+            "Clipboard items restored: \(restoredClipboardItems)"
         ].joined(separator: "\n")
     }
 }
@@ -152,32 +152,45 @@ enum PasteHelper {
                 target: target,
                 focusedTarget: focusedTargetInfo(),
                 textLength: 0,
-                method: "skipped empty text",
-                usedClipboard: false
+                restoredClipboardItems: 0,
+                method: "skipped empty text"
             )
         }
+
+        let pasteboard = NSPasteboard.general
+        let previous = PasteboardSnapshot.capture(from: pasteboard)
+        let previousItemCount = previous.itemCount
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
 
         activate(target)
-        focusStoredElement(in: target)
 
-        if let element = target?.focusedElement ?? captureFrontmostApp()?.focusedElement,
-           insertByAccessibility(text, into: element) {
-            return PasteResult(
-                target: target,
-                focusedTarget: focusedTargetInfo(),
-                textLength: text.count,
-                method: "accessibility text insert",
-                usedClipboard: false
-            )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            focusStoredElement(in: target)
+            let source = CGEventSource(stateID: .hidSystemState)
+            let vDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true)
+            let vUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
+            vDown?.flags = .maskCommand
+            vUp?.flags = .maskCommand
+            if let target {
+                vDown?.postToPid(target.processIdentifier)
+                vUp?.postToPid(target.processIdentifier)
+            } else {
+                vDown?.post(tap: .cghidEventTap)
+                vUp?.post(tap: .cghidEventTap)
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                previous.restore(to: .general)
+            }
         }
 
-        postUnicodeText(text, into: target)
         return PasteResult(
             target: target,
             focusedTarget: focusedTargetInfo(),
             textLength: text.count,
-            method: "keyboard text events",
-            usedClipboard: false
+            restoredClipboardItems: previousItemCount,
+            method: "clipboard + Command-V"
         )
     }
 
@@ -222,97 +235,6 @@ enum PasteHelper {
         AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
     }
 
-    private static func insertByAccessibility(_ text: String, into element: AXUIElement) -> Bool {
-        if isSettable(kAXSelectedTextAttribute, on: element),
-           AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) == .success {
-            return true
-        }
-
-        guard isSettable(kAXValueAttribute, on: element),
-              let currentValue = stringAttribute(kAXValueAttribute, from: element) else {
-            return false
-        }
-
-        let currentNSString = currentValue as NSString
-        let selectedRange = selectedTextRange(from: element) ?? CFRange(location: currentNSString.length, length: 0)
-        guard selectedRange.location >= 0, selectedRange.location <= currentNSString.length else {
-            return false
-        }
-
-        let safeLength = min(max(selectedRange.length, 0), currentNSString.length - selectedRange.location)
-        let mutable = NSMutableString(string: currentValue)
-        mutable.replaceCharacters(in: NSRange(location: selectedRange.location, length: safeLength), with: text)
-
-        guard AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, mutable.copy() as! CFString) == .success else {
-            return false
-        }
-
-        let insertedLength = (text as NSString).length
-        var newRange = CFRange(location: selectedRange.location + insertedLength, length: 0)
-        if let rangeValue = AXValueCreate(.cfRange, &newRange) {
-            AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, rangeValue)
-        }
-        return true
-    }
-
-    private static func postUnicodeText(_ text: String, into target: TargetApp?) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            activate(target)
-            focusStoredElement(in: target)
-            let source = CGEventSource(stateID: .hidSystemState)
-            let utf16 = Array(text.utf16)
-            let chunkSize = 64
-
-            for start in stride(from: 0, to: utf16.count, by: chunkSize) {
-                let end = min(start + chunkSize, utf16.count)
-                let chunk = Array(utf16[start..<end])
-                let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true)
-                chunk.withUnsafeBufferPointer { buffer in
-                    event?.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress)
-                }
-
-                if let target {
-                    event?.postToPid(target.processIdentifier)
-                } else {
-                    event?.post(tap: .cghidEventTap)
-                }
-            }
-        }
-    }
-
-    private static func isSettable(_ attribute: String, on element: AXUIElement) -> Bool {
-        var settable = DarwinBoolean(false)
-        guard AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success else {
-            return false
-        }
-        return settable.boolValue
-    }
-
-    private static func selectedTextRange(from element: AXUIElement) -> CFRange? {
-        var valueRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            element,
-            kAXSelectedTextRangeAttribute as CFString,
-            &valueRef
-        ) == .success else {
-            return nil
-        }
-        guard let valueRef, CFGetTypeID(valueRef) == AXValueGetTypeID() else {
-            return nil
-        }
-
-        let value = valueRef as! AXValue
-        guard AXValueGetType(value) == .cfRange else {
-            return nil
-        }
-
-        var range = CFRange()
-        guard AXValueGetValue(value, .cfRange, &range) else {
-            return nil
-        }
-        return range
-    }
-
     private static func isTextInputElement(_ element: AXUIElement) -> Bool {
         if let role = stringAttribute(kAXRoleAttribute, from: element) {
             let textRoles: Set<String> = ["AXTextArea", "AXTextField", "AXComboBox", "AXSearchField"]
@@ -345,5 +267,35 @@ enum PasteHelper {
             return nil
         }
         return valueRef as? String
+    }
+}
+
+private struct PasteboardSnapshot: @unchecked Sendable {
+    let items: [NSPasteboardItem]
+
+    var itemCount: Int {
+        items.count
+    }
+
+    static func capture(from pasteboard: NSPasteboard) -> PasteboardSnapshot {
+        let copiedItems = (pasteboard.pasteboardItems ?? []).map { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    copy.setData(data, forType: type)
+                } else if let string = item.string(forType: type) {
+                    copy.setString(string, forType: type)
+                }
+            }
+            return copy
+        }
+        return PasteboardSnapshot(items: copiedItems)
+    }
+
+    func restore(to pasteboard: NSPasteboard) {
+        pasteboard.clearContents()
+        if !items.isEmpty {
+            pasteboard.writeObjects(items)
+        }
     }
 }
