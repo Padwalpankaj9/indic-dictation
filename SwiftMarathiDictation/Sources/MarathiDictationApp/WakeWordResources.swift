@@ -10,8 +10,25 @@ enum WakeWordResources {
         directory.appendingPathComponent(classifierFileName)
     }
 
+    static var bundledClassifierURL: URL? {
+        Bundle.module.url(
+            forResource: "hey_vaani",
+            withExtension: "onnx",
+            subdirectory: "WakeWord"
+        )
+    }
+
     static func ensureDirectory() throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    static func installBundledClassifierIfNeeded() throws {
+        let fileManager = FileManager.default
+        guard !fileManager.fileExists(atPath: classifierURL.path) else { return }
+        guard let bundledClassifierURL else { return }
+
+        try ensureDirectory()
+        try fileManager.copyItem(at: bundledClassifierURL, to: classifierURL)
     }
 
     static func openDirectory() throws {
@@ -20,6 +37,8 @@ enum WakeWordResources {
     }
 
     static func setupStatus() -> WakeWordSetupStatus {
+        try? installBundledClassifierIfNeeded()
+
         let fileManager = FileManager.default
         var missing: [String] = []
         if !fileManager.fileExists(atPath: classifierURL.path) {

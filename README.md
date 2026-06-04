@@ -73,10 +73,30 @@ cd SwiftMarathiDictation
 ./scripts/package_app.sh --release --install
 ```
 
+Build a shareable DMG:
+
+```bash
+cd SwiftMarathiDictation
+INDIC_DICTATION_VERSION=0.1.0 ./scripts/create_dmg.sh
+```
+
 The installed app is:
 
 ```bash
 /Applications/Indic Dictation.app
+```
+
+The DMG contains `Indic Dictation.app` and an `Applications` shortcut. For public distribution, sign the app with a Developer ID Application certificate, then notarize and staple the DMG:
+
+```bash
+INDIC_DICTATION_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+INDIC_DICTATION_VERSION=0.1.0 \
+./scripts/create_dmg.sh
+
+INDIC_DICTATION_NOTARY_APPLE_ID="you@example.com" \
+INDIC_DICTATION_NOTARY_TEAM_ID="TEAMID" \
+INDIC_DICTATION_NOTARY_PASSWORD="app-specific-password" \
+./scripts/notarize_dmg.sh dist/Indic-Dictation-0.1.0.dmg
 ```
 
 ## UI workflow
@@ -173,6 +193,7 @@ The menu bar app shows a permission summary and has direct links to the relevant
 - Final English text is inserted into the currently focused app on your Mac.
 - Normal app users store their Sarvam API key in macOS Keychain.
 - Developer builds can also read `SARVAM_API_KEY` from the local environment or `~/.config/shell/secrets.env`.
+- The `Hey Vaani` wake-word classifier is bundled with the app and copied into Application Support on first launch.
 - API keys, recordings, generated responses, app bundles, build outputs, and local settings are excluded from git.
 - Do not commit personal recordings or real API keys.
 

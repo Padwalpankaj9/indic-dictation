@@ -20,7 +20,8 @@ let package = Package(
                 .product(name: "LiveKitWakeWord", package: "livekit-wakeword")
             ],
             resources: [
-                .copy("Resources/Icons")
+                .copy("Resources/Icons"),
+                .copy("Resources/WakeWord")
             ]
         )
     ]
