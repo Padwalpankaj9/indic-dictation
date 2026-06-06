@@ -63,6 +63,7 @@ struct TargetApp: @unchecked Sendable {
     let bundleIdentifier: String
     let processIdentifier: pid_t
     let focusedElement: AXUIElement?
+    let frame: CGRect?
 
     var hasFocusedElement: Bool {
         focusedElement != nil
@@ -129,11 +130,14 @@ enum PasteHelper {
         }
 
         let focusedElement = captureFocusedTextElement(processIdentifier: app.processIdentifier)
+        let frame = focusedElement.flatMap(elementFrame)
+            ?? captureFocusedWindowFrame(processIdentifier: app.processIdentifier)
         return TargetApp(
             name: app.localizedName ?? bundleID,
             bundleIdentifier: bundleID,
             processIdentifier: app.processIdentifier,
-            focusedElement: focusedElement
+            focusedElement: focusedElement,
+            frame: frame
         )
     }
 
@@ -258,6 +262,40 @@ enum PasteHelper {
         return isTextInputElement(element) ? element : nil
     }
 
+    private static func captureFocusedWindowFrame(processIdentifier: pid_t) -> CGRect? {
+        guard PermissionManager.accessibilityGranted else {
+            return nil
+        }
+
+        let appElement = AXUIElementCreateApplication(processIdentifier)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            appElement,
+            kAXFocusedWindowAttribute as CFString,
+            &value
+        ) == .success else {
+            return nil
+        }
+        guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else {
+            return nil
+        }
+
+        return elementFrame(value as! AXUIElement)
+    }
+
+    private static func elementFrame(_ element: AXUIElement) -> CGRect? {
+        guard
+            let origin = pointAttribute(kAXPositionAttribute, from: element),
+            let size = sizeAttribute(kAXSizeAttribute, from: element)
+        else {
+            return nil
+        }
+        guard size.width > 0, size.height > 0 else {
+            return nil
+        }
+        return CGRect(origin: origin, size: size)
+    }
+
     private static func focusStoredElement(in target: TargetApp?) {
         guard let element = target?.focusedElement else { return }
         AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
@@ -295,6 +333,38 @@ enum PasteHelper {
             return nil
         }
         return valueRef as? String
+    }
+
+    private static func pointAttribute(_ name: String, from element: AXUIElement) -> CGPoint? {
+        var valueRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, name as CFString, &valueRef) == .success else {
+            return nil
+        }
+        guard let valueRef, CFGetTypeID(valueRef) == AXValueGetTypeID() else {
+            return nil
+        }
+
+        var point = CGPoint.zero
+        guard AXValueGetValue(valueRef as! AXValue, .cgPoint, &point) else {
+            return nil
+        }
+        return point
+    }
+
+    private static func sizeAttribute(_ name: String, from element: AXUIElement) -> CGSize? {
+        var valueRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, name as CFString, &valueRef) == .success else {
+            return nil
+        }
+        guard let valueRef, CFGetTypeID(valueRef) == AXValueGetTypeID() else {
+            return nil
+        }
+
+        var size = CGSize.zero
+        guard AXValueGetValue(valueRef as! AXValue, .cgSize, &size) else {
+            return nil
+        }
+        return size
     }
 }
 

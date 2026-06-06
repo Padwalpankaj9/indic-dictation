@@ -26,6 +26,7 @@ final class VoiceIndicator {
 
     private let window: NSWindow
     private let model: IndicatorModel
+    private var preferredTargetFrame: NSRect?
 
     init() {
         model = IndicatorModel(meter: meter)
@@ -36,29 +37,32 @@ final class VoiceIndicator {
         hosting.frame = NSRect(origin: .zero, size: rect.size)
         hosting.autoresizingMask = [.width, .height]
 
-        window = NSWindow(contentRect: rect, styleMask: .borderless, backing: .buffered, defer: false)
+        window = NSPanel(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         window.level = .floating
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
         window.ignoresMouseEvents = true
         window.canHide = false
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         window.contentView = hosting
     }
 
-    func showRecording() {
+    func showRecording(targetFrame: CGRect? = nil) {
         // Note: does NOT touch the text. START_SPEECH calls this repeatedly,
         // and clearing here is what made the preview flicker.
+        if let targetFrame {
+            preferredTargetFrame = NSRect(origin: targetFrame.origin, size: targetFrame.size)
+        }
         model.state = .recording
-        moveToActiveScreen()
+        moveToActiveSpaceIfNeeded(force: targetFrame != nil)
         window.orderFrontRegardless()
     }
 
     func showProcessing() {
         // Keep the text visible through finalizing so it never blinks away.
         model.state = .processing
-        moveToActiveScreen()
+        moveToActiveSpaceIfNeeded(force: false)
         window.orderFrontRegardless()
     }
 
@@ -83,20 +87,35 @@ final class VoiceIndicator {
         window.orderOut(nil)
         model.previewText = ""
         meter.reset()
+        preferredTargetFrame = nil
     }
 
-    private func moveToActiveScreen() {
-        window.setFrame(Self.windowFrame(for: Self.targetScreen()), display: true)
+    private func moveToActiveSpaceIfNeeded(force: Bool) {
+        guard force || !window.isVisible else { return }
+        if window.isVisible {
+            // Re-showing lets AppKit attach the panel to the current Space.
+            window.orderOut(nil)
+        }
+        window.setFrame(Self.windowFrame(for: Self.targetScreen(for: preferredTargetFrame)), display: true)
     }
 
-    private static func targetScreen() -> NSScreen {
+    private static func targetScreen(for targetFrame: NSRect? = nil) -> NSScreen {
+        if let targetFrame,
+           let screen = screen(containing: NSPoint(x: targetFrame.midX, y: targetFrame.midY)) {
+            return screen
+        }
+
         let mouseLocation = NSEvent.mouseLocation
-        if let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) {
+        if let screen = screen(containing: mouseLocation) {
             return screen
         }
         return NSScreen.screens.min { lhs, rhs in
             distanceSquared(from: mouseLocation, to: lhs.frame) < distanceSquared(from: mouseLocation, to: rhs.frame)
         } ?? NSScreen.main!
+    }
+
+    private static func screen(containing point: NSPoint) -> NSScreen? {
+        NSScreen.screens.first { $0.frame.contains(point) }
     }
 
     private static func windowFrame(for screen: NSScreen) -> NSRect {
@@ -224,28 +243,30 @@ private struct MicBadge: View {
     }
 }
 
-/// A wider waveform that responds to live mic loudness and reads clearly at a glance.
+/// A compact waveform with travelling motion, so speech feels alive instead of
+/// just scaling a fixed row of bars.
 private struct WaveBars: View {
     let meter: AudioLevelMeter
 
     private let weights: [CGFloat] = [
-        0.16, 0.24, 0.38, 0.58, 0.74, 0.48,
-        0.32, 0.66, 0.92, 0.72, 0.44, 0.30,
-        0.54, 0.84, 1.00, 0.86, 0.60, 0.36,
-        0.42, 0.70, 0.96, 0.78, 0.52, 0.30,
-        0.24, 0.46, 0.68, 0.50, 0.34, 0.22,
-        0.16, 0.12
+        0.20, 0.32, 0.52, 0.76, 0.64, 0.38,
+        0.28, 0.58, 0.90, 0.74, 0.48, 0.34,
+        0.46, 0.82, 1.00, 0.88, 0.62, 0.40,
+        0.34, 0.68, 0.96, 0.78, 0.54, 0.36,
+        0.26, 0.50, 0.72, 0.56, 0.40, 0.28,
+        0.22, 0.18
     ]
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 45.0)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             let level = CGFloat(meter.value)
-            HStack(spacing: 2.4) {
+            HStack(spacing: 2.15) {
                 ForEach(weights.indices, id: \.self) { index in
                     Capsule()
-                        .fill(Color.white.opacity(barOpacity(index, level)))
-                        .frame(width: 1.25, height: barHeight(index, t, level))
+                        .fill(Color.white.opacity(barOpacity(index, t, level)))
+                        .frame(width: 1.35, height: barHeight(index, t, level))
+                        .animation(.interactiveSpring(response: 0.16, dampingFraction: 0.74), value: level)
                 }
             }
             .frame(width: 142, height: 22)
@@ -253,18 +274,22 @@ private struct WaveBars: View {
     }
 
     private func barHeight(_ index: Int, _ t: TimeInterval, _ level: CGFloat) -> CGFloat {
-        let base: CGFloat = 2.4
-        let maxHeight: CGFloat = 19
-        let idle = 0.5 + 0.5 * sin(t * 3.8 + Double(index) * 0.64)
-        let boostedLevel = min(1, pow(level * 2.7, 0.72))
-        let energy = boostedLevel * weights[index]
-        let mix = max(CGFloat(idle) * 0.08, energy)
-        return base + mix * maxHeight
+        let base: CGFloat = 2.2
+        let maxHeight: CGFloat = 19.5
+        let voice = min(1, pow(max(level, 0.001) * 2.9, 0.68))
+        let indexPhase = Double(index) * 0.58
+        let travel = 0.5 + 0.5 * sin(t * (5.8 + Double(voice) * 3.4) - indexPhase)
+        let shimmer = 0.5 + 0.5 * sin(t * 11.0 + Double(index) * 1.37)
+        let idle = 0.08 + 0.10 * CGFloat(travel)
+        let spoken = voice * weights[index] * (0.54 + 0.34 * CGFloat(travel) + 0.12 * CGFloat(shimmer))
+        let edgeFade = min(1, CGFloat(min(index + 2, weights.count - index + 1)) / 6)
+        return base + min(1, idle + spoken) * maxHeight * edgeFade
     }
 
-    private func barOpacity(_ index: Int, _ level: CGFloat) -> CGFloat {
+    private func barOpacity(_ index: Int, _ t: TimeInterval, _ level: CGFloat) -> CGFloat {
         let edgeFade = min(1, CGFloat(min(index + 3, weights.count - index + 2)) / 8)
-        return min(1, 0.58 + edgeFade * 0.32 + min(1, level * 2.0) * 0.20)
+        let pulse = 0.5 + 0.5 * sin(t * 4.6 - Double(index) * 0.42)
+        return min(1, 0.42 + edgeFade * 0.36 + min(1, level * 2.4) * 0.18 + CGFloat(pulse) * 0.08)
     }
 }
 

@@ -80,6 +80,11 @@ plutil -lint "$CONTENTS/Info.plist" >/dev/null
 clean_bundle_metadata "$APP_DIR"
 
 if [[ -z "$SIGN_IDENTITY" ]]; then
+  # Prefer the public release identity so macOS permissions survive local updates.
+  SIGN_IDENTITY="$(security find-identity -v -p codesigning | awk -F '"' '/Developer ID Application: Pankaj Padwal/ { print $2; exit }')"
+fi
+
+if [[ -z "$SIGN_IDENTITY" ]]; then
   SIGN_IDENTITY="$(security find-identity -v -p codesigning | awk -F '"' '/Apple Development: padwalpankaj9@gmail.com/ { print $2; exit }')"
 fi
 

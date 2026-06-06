@@ -82,6 +82,11 @@ cd SwiftMarathiDictation
 ./scripts/package_app.sh --release --install
 ```
 
+If a Developer ID Application certificate is installed, the packaging script uses
+it automatically. This keeps macOS privacy permissions stable across local app
+updates. If no Developer ID certificate is available, the script falls back to an
+Apple Development identity and then ad-hoc signing.
+
 Build a shareable DMG:
 
 ```bash
@@ -95,7 +100,10 @@ The installed app is:
 /Applications/Indic Dictation.app
 ```
 
-The DMG contains `Indic Dictation.app` and an `Applications` shortcut. For public distribution, sign the app with a Developer ID Application certificate, then notarize and staple the DMG:
+The DMG contains `Indic Dictation.app` and an `Applications` shortcut. For public
+distribution, build with a Developer ID Application certificate, then notarize
+and staple the DMG. You can pass the identity explicitly, or let the packaging
+script pick an installed Developer ID identity automatically:
 
 ```bash
 INDIC_DICTATION_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \

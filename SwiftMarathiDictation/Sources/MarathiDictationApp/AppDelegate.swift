@@ -572,7 +572,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         activeRecordingID = recordingID
         markLatency(isHandsFreeRecording ? "wake word" : "hotkey down")
         indicator.clearPreview()
-        indicator.showRecording()
+        indicator.showRecording(targetFrame: targetApp?.frame)
         let mode = isHandsFreeRecording ? "Hands-free recording" : locked ? "Locked recording" : "Recording"
         setStatus("\(mode) into \(targetApp?.name ?? "unknown target")")
 
@@ -948,8 +948,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         latestWakeStreak = 2
         stopWakeWordListener()
         setStatus(String(format: "Wake heard %.2f", confidence))
-        indicator.clearPreview()
-        indicator.showRecording()
         isHandsFreeRecording = true
         startRecording(locked: true)
         if activeRecordingID != nil {
