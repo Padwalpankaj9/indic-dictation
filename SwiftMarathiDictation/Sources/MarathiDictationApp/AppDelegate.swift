@@ -46,6 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isPreparingWarmClient = false
     private var recordingStartedAt: Date?
     private var activeRecordingID: UUID?
+    private var finalizingRecordingID: UUID?
+    private var cancelledRecordingIDs: Set<UUID> = []
+    private var escapeCancelWasPressed = false
     private var didMarkFirstServerEvent = false
     private var didMarkFirstText = false
     private var latencyStartedAt: Date?
@@ -232,8 +235,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func pollHotkey() {
         updateLastTargetApp()
+        let isEscapePressed = ShortcutPoller.isEscapePressed()
+        if isEscapePressed, !escapeCancelWasPressed {
+            escapeCancelWasPressed = true
+            if cancelActiveDictation(reason: "Cancelled") {
+                return
+            }
+        } else if !isEscapePressed {
+            escapeCancelWasPressed = false
+        }
+
         let isPressed = ShortcutPoller.isPressed(selectedShortcut)
         if isHandsFreeRecording {
+            if !handsFreeModeEnabled {
+                cancelActiveDictation(reason: "Hands-free off")
+                return
+            }
             if activeRecordingID != nil, isPressed, !handsFreeStopShortcutWasPressed {
                 handsFreeStopShortcutWasPressed = true
                 setStatus("Manual stop")
@@ -249,7 +266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateLastTargetApp() {
-        guard activeRecordingID == nil, !wakeSampleRecorder.isRecording else { return }
+        guard activeRecordingID == nil, finalizingRecordingID == nil, !wakeSampleRecorder.isRecording else { return }
         guard let app = PasteHelper.captureFrontmostApp(ignoring: ignoredTargetBundleIdentifiers) else { return }
         lastTargetApp = preferredTarget(captured: app)
     }
@@ -287,6 +304,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if handsFreeModeEnabled {
             startWakeWordListener()
         } else {
+            if isHandsFreeRecording {
+                cancelActiveDictation(reason: "Hands-free off")
+            }
             stopWakeWordListener()
             stopHandsFreeSilenceMonitor()
             stopHandsFreeIdleMonitor()
@@ -510,6 +530,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startRecording(locked: Bool) {
         guard activeRecordingID == nil else { return }
+        if isHandsFreeRecording, !handsFreeModeEnabled {
+            isHandsFreeRecording = false
+            indicator.hide()
+            setStatus("Hands-free off")
+            return
+        }
         guard !wakeSampleRecorder.isRecording else {
             setStatus("Sample recording active")
             return
@@ -682,6 +708,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func stopRecording() {
         guard audioStreamer != nil || streamingClient != nil || audioBuffer != nil else { return }
+        guard let recordingID = activeRecordingID else { return }
         stopHandsFreeSilenceMonitor()
         let streamer = audioStreamer
         let buffer = audioBuffer
@@ -695,6 +722,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         streamingClient = nil
         recordingStartedAt = nil
         activeRecordingID = nil
+        finalizingRecordingID = recordingID
 
         streamer?.stop()
         indicator.showProcessing()
@@ -716,9 +744,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let latency = Date().timeIntervalSince(startedAt)
                 try await MainActor.run {
                     self.markLatency("stream finalized")
+                    guard !self.cancelledRecordingIDs.contains(recordingID) else {
+                        self.finishCancelledRecording(recordingID)
+                        return
+                    }
                     self.latestEnglish = result.text
                     self.prepareWarmStreamingClient()
                     guard PermissionManager.pasteEventsGranted else {
+                        if self.finalizingRecordingID == recordingID {
+                            self.finalizingRecordingID = nil
+                        }
                         self.indicator.hide()
                         self.setStatus("Paste permission needed")
                         self.showNotification(title: "Permission needed", body: "Enable Accessibility for Indic Dictation to paste into other apps.")
@@ -726,6 +761,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         return
                     }
                     guard !result.text.isEmpty else {
+                        if self.finalizingRecordingID == recordingID {
+                            self.finalizingRecordingID = nil
+                        }
                         self.indicator.hide()
                         self.setStatus("No speech detected")
                         self.finishHandsFreeCycleIfNeeded()
@@ -733,6 +771,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     self.lastPasteResult = try PasteHelper.paste(result.text, into: targetApp)
                     self.markLatency("paste complete")
+                    if self.finalizingRecordingID == recordingID {
+                        self.finalizingRecordingID = nil
+                    }
                     self.indicator.hide()
                     self.setStatus("Pasted. \(String(format: "%.1f", latency))s")
                     self.finishHandsFreeCycleIfNeeded()
@@ -740,6 +781,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch {
                 await MainActor.run {
                     self.prepareWarmStreamingClient()
+                    if self.finalizingRecordingID == recordingID {
+                        self.finalizingRecordingID = nil
+                    }
+                    self.cancelledRecordingIDs.remove(recordingID)
                     self.indicator.hide()
                     self.setStatus("Error")
                     self.showNotification(title: "Dictation error", body: error.localizedDescription)
@@ -753,6 +798,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         client.onText = { [weak self] text in
             Task { @MainActor in
                 guard let self else { return }
+                guard self.activeRecordingID != nil else { return }
                 if !self.didMarkFirstText {
                     self.didMarkFirstText = true
                     self.markLatency("first English text")
@@ -776,6 +822,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.markLatency("first server event")
                 }
                 if event == "START_SPEECH" {
+                    guard self.activeRecordingID != nil else { return }
                     self.indicator.showRecording()
                 }
             }
@@ -838,7 +885,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startWakeWordListener() {
-        guard handsFreeModeEnabled, activeRecordingID == nil, !wakeSampleRecorder.isRecording, !wakeWordListener.isRunning else {
+        guard handsFreeModeEnabled, activeRecordingID == nil, finalizingRecordingID == nil, !wakeSampleRecorder.isRecording, !wakeWordListener.isRunning else {
             return
         }
         guard PermissionManager.microphoneGranted else {
@@ -888,7 +935,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleWakeWordDetected(confidence: Float, samples: [Int16]) {
-        guard handsFreeModeEnabled, activeRecordingID == nil else { return }
+        guard handsFreeModeEnabled, activeRecordingID == nil, finalizingRecordingID == nil else {
+            if !handsFreeModeEnabled {
+                stopWakeWordListener()
+                indicator.hide()
+            }
+            return
+        }
         handsFreeStopShortcutWasPressed = false
         lastWakeTriggerSamples = samples
         latestWakeConfidence = confidence
@@ -957,6 +1010,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if handsFreeModeEnabled {
             startWakeWordListener()
         }
+    }
+
+    @discardableResult
+    private func cancelActiveDictation(reason: String) -> Bool {
+        guard activeRecordingID != nil || finalizingRecordingID != nil || audioStreamer != nil || streamingClient != nil || audioBuffer != nil else {
+            return false
+        }
+
+        let activeRecordingIDToCancel = activeRecordingID
+        let finalizingRecordingIDToCancel = finalizingRecordingID
+        if let activeRecordingIDToCancel {
+            cancelledRecordingIDs.insert(activeRecordingIDToCancel)
+        }
+        if let finalizingRecordingIDToCancel {
+            cancelledRecordingIDs.insert(finalizingRecordingIDToCancel)
+        }
+
+        stopHandsFreeSilenceMonitor()
+        let streamer = audioStreamer
+        let buffer = audioBuffer
+        let client = streamingClient
+
+        audioStreamer = nil
+        audioBuffer = nil
+        streamingClient = nil
+        recordingStartedAt = nil
+        activeRecordingID = nil
+        finalizingRecordingID = nil
+        liveEnglish = ""
+
+        streamer?.stop()
+        buffer?.clear()
+        client?.close()
+        shortcutState.reset(notify: false, stopActive: false)
+        indicator.hide()
+        setStatus(reason)
+        prepareWarmStreamingClient()
+        finishHandsFreeCycleIfNeeded()
+        if finalizingRecordingIDToCancel == nil, let activeRecordingIDToCancel {
+            cancelledRecordingIDs.remove(activeRecordingIDToCancel)
+        }
+        return true
+    }
+
+    private func finishCancelledRecording(_ recordingID: UUID) {
+        cancelledRecordingIDs.remove(recordingID)
+        if finalizingRecordingID == recordingID {
+            finalizingRecordingID = nil
+        }
+        indicator.hide()
+        setStatus("Cancelled")
+        prepareWarmStreamingClient()
+        finishHandsFreeCycleIfNeeded()
     }
 
     private func startHandsFreeIdleMonitor() {

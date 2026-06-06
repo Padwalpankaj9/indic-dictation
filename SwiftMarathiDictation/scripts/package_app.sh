@@ -7,6 +7,7 @@ EXECUTABLE_NAME="IndicDictationApp"
 CONFIG="release"
 INSTALL_APP=false
 SIGN_IDENTITY="${INDIC_DICTATION_SIGN_IDENTITY:-${MARATHI_DICTATION_SIGN_IDENTITY:-}}"
+ENTITLEMENTS="$ROOT/Packaging/Entitlements.plist"
 
 clean_bundle_metadata() {
   local bundle_path="$1"
@@ -87,7 +88,7 @@ if [[ -z "$SIGN_IDENTITY" ]]; then
   SIGN_IDENTITY="-"
 fi
 
-SIGN_OPTIONS=(--force --deep --sign "$SIGN_IDENTITY")
+SIGN_OPTIONS=(--force --deep --sign "$SIGN_IDENTITY" --entitlements "$ENTITLEMENTS")
 if [[ "$SIGN_IDENTITY" != "-" ]]; then
   SIGN_OPTIONS+=(--options runtime --timestamp)
 fi

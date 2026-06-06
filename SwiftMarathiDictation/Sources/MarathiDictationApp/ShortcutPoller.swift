@@ -10,6 +10,10 @@ enum ShortcutPoller {
         return preset.modifiers.allSatisfy { states[$0] == true }
     }
 
+    static func isEscapePressed() -> Bool {
+        isKeyDown(kVK_Escape)
+    }
+
     private static func isModifierPressed(_ modifier: ModifierName) -> Bool {
         switch modifier {
         case .command:

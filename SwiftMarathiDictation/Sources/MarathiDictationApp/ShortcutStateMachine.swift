@@ -30,8 +30,8 @@ final class ShortcutStateMachine {
         self.statusChanged = statusChanged
     }
 
-    func reset(notify: Bool = true) {
-        if mode == .holdRecording || mode == .lockedRecording {
+    func reset(notify: Bool = true, stopActive: Bool = true) {
+        if stopActive, mode == .holdRecording || mode == .lockedRecording {
             stopRecording()
         }
         mode = .idle
