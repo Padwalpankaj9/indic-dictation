@@ -14,6 +14,14 @@ The current implementation is Marathi-first. The architecture is intentionally s
 
 Indic Dictation is early but usable. The native macOS app supports low-latency Marathi-to-English dictation today, and the next major direction is making the language layer configurable so the same workflow can support more Indian languages.
 
+## Download
+
+Download the latest notarized Mac installer from GitHub Releases:
+
+[Download Indic Dictation v0.1.1](https://github.com/Padwalpankaj9/indic-dictation/releases/download/v0.1.1/Indic-Dictation-0.1.1.dmg)
+
+After opening the DMG, drag `Indic Dictation.app` to `Applications`, launch it, add your Sarvam API key from the menu bar, and grant the requested macOS permissions.
+
 ## What it does
 
 - Runs as a native Swift menu bar app.
@@ -21,6 +29,7 @@ Indic Dictation is early but usable. The native macOS app supports low-latency M
 - Translates Marathi speech to English while recording.
 - Automatically inserts the English translation into the focused app.
 - Supports hold-to-record and double-tap lock recording modes.
+- Supports Escape to cancel the current or finalizing dictation without pasting.
 - Lets the shortcut be changed from the menu bar.
 - Lets the microphone input be selected from the menu bar.
 - Uses accuracy-first streaming defaults that still feel fast in normal use.
@@ -90,13 +99,13 @@ The DMG contains `Indic Dictation.app` and an `Applications` shortcut. For publi
 
 ```bash
 INDIC_DICTATION_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
-INDIC_DICTATION_VERSION=0.1.0 \
+INDIC_DICTATION_VERSION=0.1.1 \
 ./scripts/create_dmg.sh
 
 INDIC_DICTATION_NOTARY_APPLE_ID="you@example.com" \
 INDIC_DICTATION_NOTARY_TEAM_ID="TEAMID" \
 INDIC_DICTATION_NOTARY_PASSWORD="app-specific-password" \
-./scripts/notarize_dmg.sh dist/Indic-Dictation-0.1.0.dmg
+./scripts/notarize_dmg.sh dist/Indic-Dictation-0.1.1.dmg
 ```
 
 ## UI workflow
@@ -201,7 +210,6 @@ The menu bar app shows a permission summary and has direct links to the relevant
 
 - Configurable source language selection for additional Indic languages.
 - Cleaner first-run permission onboarding.
-- Signed release builds with a simple installer flow.
 - Better streaming diagnostics for latency and network failures.
 - Optional post-processing layer for tone, grammar, and formatting.
 - Automated tests for shortcut state, settings, and Sarvam response parsing.
