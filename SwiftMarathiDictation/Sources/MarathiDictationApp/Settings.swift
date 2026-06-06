@@ -100,7 +100,7 @@ enum AppSettings {
         ShortcutPreset(name: "Function + Option", modifiers: [.function, .option])
     ]
 
-    static let defaultPreset = presets[0]
+    static let defaultPreset = presets.first { $0.name == "Function" } ?? presets[0]
     private static let settingsURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".config/indic-dictation-swift/settings.json")
     private static let legacySettingsURL = FileManager.default.homeDirectoryForCurrentUser

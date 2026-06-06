@@ -3,11 +3,29 @@ import ApplicationServices
 import Carbon
 
 enum ShortcutPoller {
+    private static let regularKeyRange = 0...127
+    private static let modifierKeyCodes: Set<Int> = [
+        kVK_Command,
+        kVK_RightCommand,
+        kVK_Option,
+        kVK_RightOption,
+        kVK_Shift,
+        kVK_RightShift,
+        kVK_Control,
+        kVK_RightControl,
+        kVK_Function
+    ]
+
     static func isPressed(_ preset: ShortcutPreset) -> Bool {
         let states = Dictionary(uniqueKeysWithValues: ModifierName.allCases.map { modifier in
             (modifier, isModifierPressed(modifier))
         })
-        return preset.modifiers.allSatisfy { states[$0] == true }
+        let required = Set(preset.modifiers)
+        let requiredModifiersAreDown = required.allSatisfy { states[$0] == true }
+        let extraModifiersAreUp = ModifierName.allCases
+            .filter { !required.contains($0) }
+            .allSatisfy { states[$0] != true }
+        return requiredModifiersAreDown && extraModifiersAreUp && !isRegularKeyPressed()
     }
 
     static func isEscapePressed() -> Bool {
@@ -31,6 +49,12 @@ enum ShortcutPoller {
 
     private static func isKeyDown(_ keyCode: Int) -> Bool {
         CGEventSource.keyState(.hidSystemState, key: CGKeyCode(keyCode))
+    }
+
+    private static func isRegularKeyPressed() -> Bool {
+        regularKeyRange.contains { keyCode in
+            !modifierKeyCodes.contains(keyCode) && isKeyDown(keyCode)
+        }
     }
 }
 
