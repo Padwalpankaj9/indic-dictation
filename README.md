@@ -18,7 +18,7 @@ Indic Dictation is early but usable. The native macOS app supports low-latency M
 
 Download the latest notarized Mac installer from GitHub Releases:
 
-[Download Indic Dictation v0.1.1](https://github.com/Padwalpankaj9/indic-dictation/releases/download/v0.1.1/Indic-Dictation-0.1.1.dmg)
+[Download Indic Dictation v0.1.2](https://github.com/Padwalpankaj9/indic-dictation/releases/download/v0.1.2/Indic-Dictation-0.1.2.dmg)
 
 After opening the DMG, drag `Indic Dictation.app` to `Applications`, launch it, add your Sarvam API key from the menu bar, and grant the requested macOS permissions.
 
@@ -91,7 +91,7 @@ Build a shareable DMG:
 
 ```bash
 cd SwiftMarathiDictation
-INDIC_DICTATION_VERSION=0.1.0 ./scripts/create_dmg.sh
+INDIC_DICTATION_VERSION=0.1.2 ./scripts/create_dmg.sh
 ```
 
 The installed app is:
@@ -107,13 +107,13 @@ script pick an installed Developer ID identity automatically:
 
 ```bash
 INDIC_DICTATION_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
-INDIC_DICTATION_VERSION=0.1.1 \
+INDIC_DICTATION_VERSION=0.1.2 \
 ./scripts/create_dmg.sh
 
 INDIC_DICTATION_NOTARY_APPLE_ID="you@example.com" \
 INDIC_DICTATION_NOTARY_TEAM_ID="TEAMID" \
 INDIC_DICTATION_NOTARY_PASSWORD="app-specific-password" \
-./scripts/notarize_dmg.sh dist/Indic-Dictation-0.1.1.dmg
+./scripts/notarize_dmg.sh dist/Indic-Dictation-0.1.2.dmg
 ```
 
 ## UI workflow
