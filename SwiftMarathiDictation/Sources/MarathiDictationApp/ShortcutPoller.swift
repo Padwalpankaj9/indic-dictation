@@ -16,9 +16,9 @@ enum ShortcutPoller {
         kVK_Function
     ]
 
-    static func isPressed(_ preset: ShortcutPreset) -> Bool {
+    static func isPressed(_ preset: ShortcutPreset, functionKeyDown: Bool) -> Bool {
         let states = Dictionary(uniqueKeysWithValues: ModifierName.allCases.map { modifier in
-            (modifier, isModifierPressed(modifier))
+            (modifier, isModifierPressed(modifier, functionKeyDown: functionKeyDown))
         })
         let required = Set(preset.modifiers)
         let requiredModifiersAreDown = required.allSatisfy { states[$0] == true }
@@ -32,7 +32,7 @@ enum ShortcutPoller {
         isKeyDown(kVK_Escape)
     }
 
-    private static func isModifierPressed(_ modifier: ModifierName) -> Bool {
+    private static func isModifierPressed(_ modifier: ModifierName, functionKeyDown: Bool) -> Bool {
         switch modifier {
         case .command:
             return isKeyDown(kVK_Command) || isKeyDown(kVK_RightCommand)
@@ -43,7 +43,11 @@ enum ShortcutPoller {
         case .control:
             return isKeyDown(kVK_Control) || isKeyDown(kVK_RightControl)
         case .function:
-            return isKeyDown(kVK_Function) || CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn)
+            // Trust the keycode-accurate Fn monitor instead of the raw flag,
+            // which macOS also sets for arrow and navigation keys. AND it with
+            // the live flag so a missed key-up can't leave Fn stuck "down" and
+            // start dictation on its own.
+            return functionKeyDown && CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn)
         }
     }
 

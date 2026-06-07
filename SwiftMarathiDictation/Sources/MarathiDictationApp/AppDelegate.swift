@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let recorder = AudioRecorder()
     private let indicator = VoiceIndicator()
+    private let functionKeyMonitor = FunctionKeyMonitor()
     private let wakeSampleRecorder = WakeWordSampleRecorder()
     private lazy var wakeWordListener = WakeWordListener(meter: indicator.meter)
     private var audioStreamer: LiveAudioStreamer?
@@ -121,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureStatusItem()
         requestNotificationPermission()
         checkPermissions()
+        functionKeyMonitor.start()
         startPolling()
         let hasAPIKey = SarvamClient.hasConfiguredAPIKey()
         if hasAPIKey {
@@ -140,6 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopWakeWordListener()
         stopHandsFreeSilenceMonitor()
         stopHandsFreeIdleMonitor()
+        functionKeyMonitor.stop()
         pollTimer?.invalidate()
     }
 
@@ -245,7 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             escapeCancelWasPressed = false
         }
 
-        let isPressed = ShortcutPoller.isPressed(selectedShortcut)
+        let isPressed = ShortcutPoller.isPressed(selectedShortcut, functionKeyDown: functionKeyMonitor.isDown)
         if isHandsFreeRecording {
             if !handsFreeModeEnabled {
                 cancelActiveDictation(reason: "Hands-free off")
