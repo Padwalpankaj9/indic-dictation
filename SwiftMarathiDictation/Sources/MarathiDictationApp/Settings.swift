@@ -76,7 +76,10 @@ enum DictationQualityMode: String, CaseIterable, Codable, Equatable {
         case .balanced:
             items.append(URLQueryItem(name: "high_vad_sensitivity", value: "true"))
         case .accurate:
-            items.append(URLQueryItem(name: "high_vad_sensitivity", value: "false"))
+            // High sensitivity only changes how fast the server decides an
+            // utterance ended, not transcription quality. Keeping it on makes
+            // the live preview update much sooner.
+            items.append(URLQueryItem(name: "high_vad_sensitivity", value: "true"))
         }
 
         return items
@@ -88,6 +91,8 @@ enum AppSettings {
     private static let handsFreeModeKey = "handsFreeModeEnabled"
     private static let selectedMicrophoneUIDKey = "selectedMicrophoneUID"
     private static let wakeWordSensitivityKey = "wakeWordSensitivity"
+    private static let asrPromptKey = "asrVocabularyPrompt"
+    private static let polishKey = "polishResponsesEnabled"
     static let defaultWakeWordSensitivity = 0.50
 
     static let presets: [ShortcutPreset] = [
@@ -158,6 +163,27 @@ enum AppSettings {
 
     static func saveWakeWordSensitivity(_ sensitivity: Double) {
         UserDefaults.standard.set(clampedSensitivity(sensitivity), forKey: wakeWordSensitivityKey)
+    }
+
+    static func loadPolishEnabled() -> Bool {
+        UserDefaults.standard.bool(forKey: polishKey)
+    }
+
+    static func savePolishEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: polishKey)
+    }
+
+    static func loadASRPrompt() -> String {
+        UserDefaults.standard.string(forKey: asrPromptKey) ?? ""
+    }
+
+    static func saveASRPrompt(_ prompt: String) {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            UserDefaults.standard.removeObject(forKey: asrPromptKey)
+        } else {
+            UserDefaults.standard.set(trimmed, forKey: asrPromptKey)
+        }
     }
 
     static func loadSelectedMicrophoneUID() -> String? {

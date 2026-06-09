@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let selectedQualityMode = DictationQualityMode.accurate
     private var hotkeyEnabled = true
     private var livePreviewEnabled = AppSettings.loadLivePreviewEnabled()
+    private var polishEnabled = AppSettings.loadPolishEnabled()
     private var handsFreeModeEnabled = AppSettings.loadHandsFreeModeEnabled()
     private var wakeWordSensitivity = AppSettings.loadWakeWordSensitivity()
     private var isHandsFreeRecording = false
@@ -34,6 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var latestEnglish = ""
     private var liveEnglish = ""
     private var currentStatus = "Ready"
+    private var asrPrompt = AppSettings.loadASRPrompt()
+    private var lastStreamErrorMessage: String?
+    private var lastTargetAppCapturedAt: Date?
 
     private let recorder = AudioRecorder()
     private let indicator = VoiceIndicator()
@@ -45,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var streamingClient: SarvamStreamingClient?
     private var warmStreamingClient: SarvamStreamingClient?
     private var isPreparingWarmClient = false
+    private var warmClientPingTimer: Timer?
     private var recordingStartedAt: Date?
     private var activeRecordingID: UUID?
     private var finalizingRecordingID: UUID?
@@ -78,8 +83,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusMenuItem = NSMenuItem(title: "Status: Ready", action: nil, keyEquivalent: "")
     private let permissionsMenuItem = NSMenuItem(title: "Permissions: Checking...", action: #selector(checkPermissions), keyEquivalent: "")
     private let apiKeyMenuItem = NSMenuItem(title: "API Key...", action: #selector(showAPIKeySettings), keyEquivalent: "")
+    private let vocabularyMenuItem = NSMenuItem(title: "Vocabulary Hints...", action: #selector(showVocabularySettings), keyEquivalent: "")
     private let hotkeyMenuItem = NSMenuItem(title: "Hotkey Enabled", action: #selector(toggleHotkey), keyEquivalent: "")
     private let livePreviewMenuItem = NSMenuItem(title: "Show Live Preview", action: #selector(toggleLivePreview), keyEquivalent: "")
+    private let polishMenuItem = NSMenuItem(title: "Polish Responses", action: #selector(togglePolish), keyEquivalent: "")
     private let handsFreeMenuItem = NSMenuItem(title: "Hands-free Mode", action: #selector(toggleHandsFreeMode), keyEquivalent: "")
     private let wakeWordConfidenceMenuItem = NSMenuItem(title: "Confidence: --", action: nil, keyEquivalent: "")
     private let wakeWordSensitivityMenuItem = NSMenuItem(title: "Sensitivity: 0.50", action: nil, keyEquivalent: "")
@@ -127,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hasAPIKey = SarvamClient.hasConfiguredAPIKey()
         if hasAPIKey {
             prepareWarmStreamingClient()
+            startWarmClientKeepalive()
         } else {
             setStatus("API key needed")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
@@ -144,6 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopHandsFreeIdleMonitor()
         functionKeyMonitor.stop()
         pollTimer?.invalidate()
+        warmClientPingTimer?.invalidate()
     }
 
     private func configureStatusItem() {
@@ -171,6 +180,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(permissionsMenuItem)
         apiKeyMenuItem.target = self
         menu.addItem(apiKeyMenuItem)
+        vocabularyMenuItem.target = self
+        menu.addItem(vocabularyMenuItem)
         menu.addItem(.separator())
 
         handsFreeMenuItem.target = self
@@ -200,6 +211,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         livePreviewMenuItem.target = self
         livePreviewMenuItem.state = livePreviewEnabled ? .on : .off
         menu.addItem(livePreviewMenuItem)
+
+        polishMenuItem.target = self
+        polishMenuItem.state = polishEnabled ? .on : .off
+        polishMenuItem.toolTip = "Restructure dictated text into clean short paragraphs with \(PolishClient.model) before pasting."
+        menu.addItem(polishMenuItem)
 
         menu.addItem(.separator())
 
@@ -266,10 +282,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard hotkeyEnabled else { return }
         shortcutState.update(isPressed: isPressed, now: Date().timeIntervalSinceReferenceDate)
+        if debugWindow?.isVisible == true {
+            updateDebugWindow()
+        }
     }
 
     private func updateLastTargetApp() {
         guard activeRecordingID == nil, finalizingRecordingID == nil, !wakeSampleRecorder.isRecording else { return }
+        // Accessibility lookups are expensive; twice a second is plenty since
+        // recording start does its own fresh capture anyway.
+        if let lastCheck = lastTargetAppCapturedAt, Date().timeIntervalSince(lastCheck) < 0.5 {
+            return
+        }
+        lastTargetAppCapturedAt = Date()
         guard let app = PasteHelper.captureFrontmostApp(ignoring: ignoredTargetBundleIdentifiers) else { return }
         lastTargetApp = preferredTarget(captured: app)
     }
@@ -369,11 +394,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             setStatus("API key saved")
             showNotification(title: "API key saved", body: "Indic Dictation will use this key for Sarvam requests.")
             prepareWarmStreamingClient()
+            startWarmClientKeepalive()
         } catch {
             setStatus("API key save failed")
             showNotification(title: "Could not save API key", body: error.localizedDescription)
         }
         refreshMenu()
+    }
+
+    @objc private func showVocabularySettings() {
+        NSApp.activate(ignoringOtherApps: true)
+
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 380, height: 90))
+        scrollView.hasVerticalScroller = true
+        scrollView.borderType = .bezelBorder
+        let textView = NSTextView(frame: scrollView.bounds)
+        textView.autoresizingMask = [.width]
+        textView.font = NSFont.systemFont(ofSize: 13)
+        textView.string = asrPrompt
+        textView.isRichText = false
+        scrollView.documentView = textView
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Vocabulary Hints"
+        alert.informativeText = """
+        Names and terms you dictate often, separated by commas. Sarvam uses these as hints, so unusual words like names or work jargon come out right.
+        """
+        alert.accessoryView = scrollView
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = textView
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        asrPrompt = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        AppSettings.saveASRPrompt(asrPrompt)
+        // The warm socket was opened with the old prompt, so swap it out.
+        warmStreamingClient?.close()
+        warmStreamingClient = nil
+        prepareWarmStreamingClient()
+        setStatus(asrPrompt.isEmpty ? "Vocabulary hints cleared" : "Vocabulary hints saved")
     }
 
     @objc private func changeWakeWordSensitivity(_ sender: NSSlider) {
@@ -411,6 +472,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             indicator.clearPreview()
         }
         setStatus(livePreviewEnabled ? "Live preview on" : "Live preview off")
+        refreshMenu()
+    }
+
+    @objc private func togglePolish() {
+        if !polishEnabled, !PolishClient.hasConfiguredAPIKey() {
+            setStatus("OpenRouter key needed")
+            showNotification(
+                title: "OpenRouter key needed",
+                body: "Add INDIC_DICTATION_OPENROUTER_API_KEY or OPENROUTER_API_KEY to ~/.config/shell/secrets.env to use polishing."
+            )
+            return
+        }
+        polishEnabled.toggle()
+        AppSettings.savePolishEnabled(polishEnabled)
+        setStatus(polishEnabled ? "Polish on" : "Polish off")
         refreshMenu()
     }
 
@@ -567,6 +643,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         latestEnglish = ""
         liveEnglish = ""
+        lastStreamErrorMessage = nil
         latencyStartedAt = Date()
         latencyMarks = []
         didMarkFirstServerEvent = false
@@ -611,13 +688,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task {
             do {
-                let qualityMode = await MainActor.run {
-                    self.selectedQualityMode
+                let (qualityMode, prompt) = await MainActor.run {
+                    (self.selectedQualityMode, self.asrPrompt)
                 }
                 let warmClient = await MainActor.run {
                     self.takeWarmStreamingClient(for: qualityMode)
                 }
-                let client = warmClient ?? SarvamStreamingClient(qualityMode: qualityMode)
+                let client = warmClient ?? SarvamStreamingClient(qualityMode: qualityMode, prompt: prompt)
 
                 let shouldAttach = await MainActor.run {
                     guard self.activeRecordingID == recordingID else {
@@ -744,14 +821,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.markLatency("audio drained")
                 }
                 let result = await client?.finish() ?? StreamingTranslationResult(text: "", chunkCount: 0)
+
+                // Optional second pass: restructure the text into clean short
+                // paragraphs. Any failure quietly falls back to the raw text.
+                let shouldPolish = await MainActor.run {
+                    self.markLatency("stream finalized")
+                    return self.polishEnabled && !result.text.isEmpty && !self.cancelledRecordingIDs.contains(recordingID)
+                }
+                var finalText = result.text
+                if shouldPolish {
+                    await MainActor.run {
+                        self.setStatus("Polishing...")
+                        self.markLatency("polish start")
+                    }
+                    finalText = await PolishClient().polishOrOriginal(result.text)
+                    await MainActor.run {
+                        self.markLatency("polish complete")
+                    }
+                }
+                let pastedText = finalText
+
                 let latency = Date().timeIntervalSince(startedAt)
                 try await MainActor.run {
-                    self.markLatency("stream finalized")
                     guard !self.cancelledRecordingIDs.contains(recordingID) else {
                         self.finishCancelledRecording(recordingID)
                         return
                     }
-                    self.latestEnglish = result.text
+                    self.latestEnglish = pastedText
                     self.prepareWarmStreamingClient()
                     guard PermissionManager.pasteEventsGranted else {
                         if self.finalizingRecordingID == recordingID {
@@ -763,16 +859,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.finishHandsFreeCycleIfNeeded()
                         return
                     }
-                    guard !result.text.isEmpty else {
+                    guard !pastedText.isEmpty else {
                         if self.finalizingRecordingID == recordingID {
                             self.finalizingRecordingID = nil
                         }
                         self.indicator.hide()
-                        self.setStatus("No speech detected")
+                        // Tell the user the real reason instead of blaming the mic.
+                        if let serverError = self.lastStreamErrorMessage {
+                            self.setStatus("Sarvam error")
+                            self.showNotification(title: "Sarvam error", body: serverError)
+                        } else {
+                            self.setStatus("No speech detected")
+                        }
                         self.finishHandsFreeCycleIfNeeded()
                         return
                     }
-                    self.lastPasteResult = try PasteHelper.paste(result.text, into: targetApp)
+                    self.lastPasteResult = try PasteHelper.paste(pastedText, into: targetApp)
                     self.markLatency("paste complete")
                     if self.finalizingRecordingID == recordingID {
                         self.finalizingRecordingID = nil
@@ -828,6 +930,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     guard self.activeRecordingID != nil else { return }
                     self.indicator.showRecording()
                 }
+                if event.hasPrefix("SERVER_ERROR: ") {
+                    self.lastStreamErrorMessage = String(event.dropFirst("SERVER_ERROR: ".count))
+                }
             }
         }
         client.onTiming = { [weak self] label in
@@ -856,9 +961,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard warmStreamingClient == nil, !isPreparingWarmClient else { return }
         isPreparingWarmClient = true
         let qualityMode = selectedQualityMode
+        let prompt = asrPrompt
 
         Task {
-            let client = SarvamStreamingClient(qualityMode: qualityMode)
+            let client = SarvamStreamingClient(qualityMode: qualityMode, prompt: prompt)
             do {
                 try await client.connect()
                 await MainActor.run {
@@ -877,8 +983,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func startWarmClientKeepalive() {
+        warmClientPingTimer?.invalidate()
+        warmClientPingTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.pingWarmStreamingClient()
+            }
+        }
+    }
+
+    // Idle sockets get killed quietly by servers and NATs. A ping every 30s
+    // either keeps the warm socket alive or tells us to open a fresh one,
+    // so dictation never starts on a dead connection.
+    private func pingWarmStreamingClient() {
+        guard let client = warmStreamingClient else { return }
+        client.ping { [weak self] alive in
+            Task { @MainActor in
+                guard let self, self.warmStreamingClient === client else { return }
+                guard !alive else { return }
+                client.close()
+                self.warmStreamingClient = nil
+                self.prepareWarmStreamingClient()
+            }
+        }
+    }
+
     private func takeWarmStreamingClient(for qualityMode: DictationQualityMode) -> SarvamStreamingClient? {
-        guard let client = warmStreamingClient, client.isUsable, client.qualityMode == qualityMode else {
+        guard let client = warmStreamingClient, client.isUsable, client.qualityMode == qualityMode, client.prompt == asrPrompt else {
             warmStreamingClient?.close()
             warmStreamingClient = nil
             return nil
@@ -1141,6 +1272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         apiKeyMenuItem.title = SarvamClient.hasConfiguredAPIKey() ? "API Key: Set..." : "API Key: Needed..."
         hotkeyMenuItem.state = hotkeyEnabled ? .on : .off
         livePreviewMenuItem.state = livePreviewEnabled ? .on : .off
+        polishMenuItem.state = polishEnabled ? .on : .off
         handsFreeMenuItem.state = handsFreeModeEnabled ? .on : .off
         if let latestWakeConfidence {
             wakeWordConfidenceMenuItem.title = String(format: "Confidence: %.2f  Streak: %d", latestWakeConfidence, latestWakeStreak)
@@ -1287,7 +1419,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Wake Listener: \(wakeWordListener.isRunning ? "Running" : "Stopped")
         Wake Sensitivity: \(String(format: "%.2f", wakeWordSensitivity)) (threshold \(String(format: "%.2f", wakeWordThreshold)))
         Shortcut: \(selectedShortcut.name)
+        Function Monitor: \(functionKeyMonitor.isListening ? "Running" : "Stopped"), tap \(functionKeyMonitor.tapLocationDescription), down \(functionKeyMonitor.isDown ? "yes" : "no"), last \(functionKeyMonitor.lastEventSummary)
         Response Mode: \(selectedQualityMode.name)
+        Polish: \(polishEnabled ? PolishClient.model : "Off")
         Microphone: \(microphoneDebugSummary())
         Target: \(target)
 
