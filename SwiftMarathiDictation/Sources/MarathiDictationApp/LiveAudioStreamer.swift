@@ -27,6 +27,15 @@ final class LiveAudioStreamer {
     private let meter: AudioLevelMeter
     // Smoothed loudness, only ever touched on the audio thread.
     private var levelEnv: Float = 0
+    // Proper resampler with anti-aliasing, replacing the old sample-picking
+    // loop that distorted the audio Sarvam heard. Only used on the audio thread.
+    private var converter: AVAudioConverter?
+    private let outputFormat = AVAudioFormat(
+        commonFormat: .pcmFormatInt16,
+        sampleRate: 16_000,
+        channels: 1,
+        interleaved: true
+    )!
 
     init(meter: AudioLevelMeter, onAudio: @escaping @Sendable (Data) -> Void) {
         self.meter = meter
@@ -39,6 +48,12 @@ final class LiveAudioStreamer {
         guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
             throw AudioStreamerError.invalidFormat
         }
+
+        guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+            throw AudioStreamerError.invalidFormat
+        }
+        converter.sampleRateConverterQuality = .max
+        self.converter = converter
 
         inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1_600, format: inputFormat) { [weak self] buffer, _ in
@@ -56,6 +71,7 @@ final class LiveAudioStreamer {
     func stop() {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        converter = nil
         levelEnv = 0
         meter.reset()
     }
@@ -72,38 +88,43 @@ final class LiveAudioStreamer {
 
         // Map raw RMS into a lively 0...1 range, then ease toward it.
         let mapped = min(1, powf(rms * 14, 0.7))
-        // Fast attack so speech pops, slower release so it settles smoothly.
-        let k: Float = mapped > levelEnv ? 0.5 : 0.18
+        // Instant attack so each syllable pops, quick release so the wave
+        // calms the moment speech stops. Release also feeds hands-free
+        // silence detection, which only gets sharper with a faster settle.
+        let k: Float = mapped > levelEnv ? 0.95 : 0.30
         levelEnv += (mapped - levelEnv) * k
         meter.set(levelEnv)
     }
 
     private func convert(_ inputBuffer: AVAudioPCMBuffer) -> Data? {
-        guard let channelData = inputBuffer.floatChannelData else {
+        guard let converter, inputBuffer.frameLength > 0 else { return nil }
+
+        let ratio = outputFormat.sampleRate / inputBuffer.format.sampleRate
+        let capacity = AVAudioFrameCount((Double(inputBuffer.frameLength) * ratio).rounded(.up)) + 16
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else {
             return nil
         }
 
-        let inputFrames = Int(inputBuffer.frameLength)
-        guard inputFrames > 0 else { return nil }
-
-        let inputSampleRate = inputBuffer.format.sampleRate
-        let channels = Int(inputBuffer.format.channelCount)
-        let outputFrames = max(1, Int(Double(inputFrames) * 16_000 / inputSampleRate))
-        var samples = [Int16]()
-        samples.reserveCapacity(outputFrames)
-
-        for outputIndex in 0..<outputFrames {
-            let inputIndex = min(inputFrames - 1, Int(Double(outputIndex) * inputSampleRate / 16_000))
-            var mixed: Float = 0
-            for channel in 0..<channels {
-                mixed += channelData[channel][inputIndex]
+        // Feed this one buffer, then report "no more for now" so the converter
+        // keeps its resampling state alive for the next mic callback.
+        // The input block runs synchronously inside convert(), so this flag
+        // never actually crosses threads.
+        nonisolated(unsafe) var consumed = false
+        var conversionError: NSError?
+        let status = converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
+            if consumed {
+                outStatus.pointee = .noDataNow
+                return nil
             }
-            mixed /= Float(channels)
-            let clamped = max(-1, min(1, mixed))
-            samples.append(Int16(clamped * Float(Int16.max)))
+            consumed = true
+            outStatus.pointee = .haveData
+            return inputBuffer
         }
 
-        return samples.withUnsafeBytes { Data($0) }
+        guard status != .error, conversionError == nil else { return nil }
+        let frames = Int(outputBuffer.frameLength)
+        guard frames > 0, let samples = outputBuffer.int16ChannelData else { return nil }
+        return Data(bytes: samples[0], count: frames * MemoryLayout<Int16>.size)
     }
 }
 

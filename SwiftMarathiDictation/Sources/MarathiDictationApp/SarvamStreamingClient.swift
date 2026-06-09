@@ -7,12 +7,16 @@ struct StreamingTranslationResult {
 
 final class SarvamStreamingClient: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
     let qualityMode: DictationQualityMode
+    let prompt: String
 
     private var task: URLSessionWebSocketTask?
     private var session: URLSession?
     private var chunks: [String] = []
     private var currentText = ""
     private var isClosed = false
+    // How many utterances the server has started (START_SPEECH) but not yet
+    // finalized with a data message. Zero means every word already arrived.
+    private var pendingUtterances = 0
 
     var onText: ((String) -> Void)?
     var onEvent: ((String) -> Void)?
@@ -22,8 +26,9 @@ final class SarvamStreamingClient: NSObject, URLSessionWebSocketDelegate, @unche
         !isClosed && task != nil
     }
 
-    init(qualityMode: DictationQualityMode = .balanced) {
+    init(qualityMode: DictationQualityMode = .balanced, prompt: String = "") {
         self.qualityMode = qualityMode
+        self.prompt = prompt
         super.init()
     }
 
@@ -44,10 +49,32 @@ final class SarvamStreamingClient: NSObject, URLSessionWebSocketDelegate, @unche
         self.isClosed = false
         self.chunks = []
         self.currentText = ""
+        self.pendingUtterances = 0
         task.resume()
         onTiming?("websocket resumed")
         onTiming?("mode \(qualityMode.name.lowercased())")
         receiveNext()
+        sendPromptIfNeeded()
+    }
+
+    // Tells the speech model which names and jargon to expect, so it stops
+    // guessing wrong on words like "Utkarsha" or "Piramal".
+    private func sendPromptIfNeeded() {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        send(StreamingConfigMessage(type: "config", prompt: trimmed))
+        onTiming?("vocabulary prompt sent")
+    }
+
+    /// Checks that the socket is still alive on the wire, not just locally.
+    func ping(completion: @escaping @Sendable (Bool) -> Void) {
+        guard !isClosed, let task else {
+            completion(false)
+            return
+        }
+        task.sendPing { error in
+            completion(error == nil)
+        }
     }
 
     func sendAudio(_ data: Data) {
@@ -65,17 +92,26 @@ final class SarvamStreamingClient: NSObject, URLSessionWebSocketDelegate, @unche
 
     func finish() async -> StreamingTranslationResult {
         if !isClosed {
-            let chunkCountAtFlush = chunks.count
-            let timeoutSeconds = qualityMode.flushTimeoutSeconds
-            let waitLimit = cleanedText().isEmpty ? max(timeoutSeconds, 0.95) : timeoutSeconds
             send(StreamingFlushMessage(type: "flush"))
             onTiming?("flush sent")
-            let deadline = Date().addingTimeInterval(waitLimit)
-            while Date() < deadline {
-                if chunks.count > chunkCountAtFlush {
-                    break
+
+            let hasText = !cleanedText().isEmpty
+            if pendingUtterances <= 0, hasText {
+                // Every utterance the server started has already produced its
+                // final text, so there is nothing left to wait for.
+                onTiming?("flush wait skipped, nothing pending")
+            } else {
+                let timeoutSeconds = qualityMode.flushTimeoutSeconds
+                let waitLimit = hasText ? timeoutSeconds : max(timeoutSeconds, 0.95)
+                let deadline = Date().addingTimeInterval(waitLimit)
+                while Date() < deadline {
+                    // Done once every open utterance has its final text in hand.
+                    if pendingUtterances <= 0, !cleanedText().isEmpty {
+                        onTiming?("pending speech finalized")
+                        break
+                    }
+                    try? await Task.sleep(for: .milliseconds(25))
                 }
-                try? await Task.sleep(for: .milliseconds(35))
             }
         }
         close()
@@ -130,11 +166,23 @@ final class SarvamStreamingClient: NSObject, URLSessionWebSocketDelegate, @unche
 
         if let response = try? JSONDecoder.streaming.decode(StreamingResponse.self, from: data) {
             if response.type == "events", let signal = response.data?.signalType {
+                if signal == "START_SPEECH" {
+                    pendingUtterances += 1
+                }
                 onEvent?(signal)
             }
-            if response.type == "data", let transcript = response.data?.transcript?.trimmingCharacters(in: .whitespacesAndNewlines), !transcript.isEmpty {
-                appendTranscript(transcript)
-                onText?(currentText)
+            if response.type == "data" {
+                // Every data message closes one started utterance, even when
+                // its transcript comes back empty.
+                pendingUtterances = max(0, pendingUtterances - 1)
+                if let transcript = response.data?.transcript?.trimmingCharacters(in: .whitespacesAndNewlines), !transcript.isEmpty {
+                    appendTranscript(transcript)
+                    onText?(currentText)
+                }
+            }
+            if response.type == "error" {
+                let message = response.data?.error ?? "unknown server error"
+                onEvent?("SERVER_ERROR: \(message)")
             }
         } else if let raw = String(data: data, encoding: .utf8) {
             onEvent?(raw)
@@ -179,6 +227,11 @@ private struct StreamingFlushMessage: Encodable {
     let type: String
 }
 
+private struct StreamingConfigMessage: Encodable {
+    let type: String
+    let prompt: String
+}
+
 private struct StreamingResponse: Decodable {
     let type: String?
     let data: StreamingResponseData?
@@ -187,10 +240,14 @@ private struct StreamingResponse: Decodable {
 private struct StreamingResponseData: Decodable {
     let transcript: String?
     let signalType: String?
+    let error: String?
+    let code: String?
 
     enum CodingKeys: String, CodingKey {
         case transcript
         case signalType = "signal_type"
+        case error
+        case code
     }
 }
 
