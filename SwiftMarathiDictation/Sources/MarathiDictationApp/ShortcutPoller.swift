@@ -43,11 +43,9 @@ enum ShortcutPoller {
         case .control:
             return isKeyDown(kVK_Control) || isKeyDown(kVK_RightControl)
         case .function:
-            // Trust the keycode-accurate Fn monitor instead of the raw flag,
-            // which macOS also sets for arrow and navigation keys. AND it with
-            // the live flag so a missed key-up can't leave Fn stuck "down" and
-            // start dictation on its own.
-            return functionKeyDown && CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn)
+            // Trust the keycode-accurate Fn monitor. The raw Fn flag is noisy:
+            // macOS can also set it while arrow/navigation keys are pressed.
+            return functionKeyDown
         }
     }
 
