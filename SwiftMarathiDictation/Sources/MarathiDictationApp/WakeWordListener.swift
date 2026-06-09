@@ -20,6 +20,10 @@ final class WakeWordListener: @unchecked Sendable {
     private let meter: AudioLevelMeter
     private let processingQueue = DispatchQueue(label: "com.indic-dictation.wake-word-listener")
     private var wakeEngine: WakeWordEngine?
+    private var engineThreshold: Float?
+    // A clearly confident hit fires immediately; only borderline scores wait
+    // for a second confirming window.
+    private var instantConfidence: Float = 1.0
     private var rollingWindow: WakeWordRollingWindow?
     private var audioStreamer: LiveAudioStreamer?
     private var onScore: ScoreHandler?
@@ -44,8 +48,18 @@ final class WakeWordListener: @unchecked Sendable {
     ) throws {
         stop()
 
-        let engine = LiveKitWakeWordEngine(threshold: threshold)
+        // Reuse the loaded ONNX model between cycles; reloading it from disk
+        // on every dictation round trip wastes hundreds of milliseconds.
+        let engine: WakeWordEngine
+        if let existing = wakeEngine, engineThreshold == threshold {
+            engine = existing
+        } else {
+            wakeEngine?.stop()
+            engine = LiveKitWakeWordEngine(threshold: threshold)
+        }
         try engine.start()
+        engineThreshold = threshold
+        instantConfidence = min(0.92, threshold + 0.30)
 
         wakeEngine = engine
         rollingWindow = WakeWordRollingWindow(windowLength: engine.requiredWindowLength)
@@ -71,10 +85,22 @@ final class WakeWordListener: @unchecked Sendable {
     func stop() {
         audioStreamer?.stop()
         audioStreamer = nil
+        clearProcessingState()
+    }
 
+    /// Hands the running mic session to the caller and shuts down only the
+    /// wake-word inference. The caller owns the returned streamer; dictation
+    /// can begin on it instantly via setSink, with no audio engine restart.
+    func detachStreamer() -> LiveAudioStreamer? {
+        let streamer = audioStreamer
+        audioStreamer = nil
+        clearProcessingState()
+        return streamer
+    }
+
+    private func clearProcessingState() {
+        // The engine (and its loaded model) is kept warm for the next start.
         processingQueue.sync {
-            wakeEngine?.stop()
-            wakeEngine = nil
             rollingWindow = nil
             onScore = nil
             onWake = nil
@@ -106,7 +132,8 @@ final class WakeWordListener: @unchecked Sendable {
                 }
                 emitScoreIfNeeded(confidence: prediction.confidence)
                 guard prediction.isDetected else { return }
-                guard consecutiveDetections >= requiredConsecutiveDetections else { return }
+                let isInstantHit = prediction.confidence >= instantConfidence
+                guard isInstantHit || consecutiveDetections >= requiredConsecutiveDetections else { return }
                 didDetectWake = true
                 let handler = onWake
                 let triggerSamples = samples

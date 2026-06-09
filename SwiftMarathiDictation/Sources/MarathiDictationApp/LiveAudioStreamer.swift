@@ -23,7 +23,9 @@ final class AudioLevelMeter: Sendable {
 
 final class LiveAudioStreamer {
     private let engine = AVAudioEngine()
-    private let onAudio: @Sendable (Data) -> Void
+    // Swappable consumer so a running mic session can be handed from
+    // wake-word listening straight to dictation without restarting audio.
+    private let sink: OSAllocatedUnfairLock<@Sendable (Data) -> Void>
     private let meter: AudioLevelMeter
     // Smoothed loudness, only ever touched on the audio thread.
     private var levelEnv: Float = 0
@@ -39,7 +41,14 @@ final class LiveAudioStreamer {
 
     init(meter: AudioLevelMeter, onAudio: @escaping @Sendable (Data) -> Void) {
         self.meter = meter
-        self.onAudio = onAudio
+        self.sink = OSAllocatedUnfairLock(initialState: onAudio)
+    }
+
+    /// Atomically reroutes the converted audio to a new consumer. Used on
+    /// wake-word trigger to flip the live mic from detection to dictation
+    /// instantly, with no engine restart and no lost syllables.
+    func setSink(_ newSink: @escaping @Sendable (Data) -> Void) {
+        sink.withLock { $0 = newSink }
     }
 
     func start() throws {
@@ -61,7 +70,8 @@ final class LiveAudioStreamer {
             // Cheap loudness read first so the meter stays in lockstep with the audio.
             self.emitLevel(buffer)
             guard let data = self.convert(buffer) else { return }
-            self.onAudio(data)
+            let deliver = self.sink.withLock { $0 }
+            deliver(data)
         }
 
         engine.prepare()

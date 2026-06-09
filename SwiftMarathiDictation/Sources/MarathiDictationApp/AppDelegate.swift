@@ -607,7 +607,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
-    private func startRecording(locked: Bool) {
+    private func startRecording(locked: Bool, reusing handedOffStreamer: LiveAudioStreamer? = nil) {
+        // If the wake listener handed us its live mic session and any guard
+        // below bails out, the orphaned session must be stopped.
+        var pendingStreamer = handedOffStreamer
+        defer { pendingStreamer?.stop() }
         guard activeRecordingID == nil else { return }
         if isHandsFreeRecording, !handsFreeModeEnabled {
             isHandsFreeRecording = false
@@ -634,7 +638,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        applySelectedMicrophoneBeforeRecording()
+        if pendingStreamer == nil {
+            applySelectedMicrophoneBeforeRecording()
+        }
 
         let capturedTarget = PasteHelper.captureFrontmostApp(ignoring: ignoredTargetBundleIdentifiers)
         targetApp = isHandsFreeRecording ? preferredTarget(captured: capturedTarget) : capturedTarget
@@ -670,13 +676,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         audioBuffer = buffer
 
         do {
-            let streamer = LiveAudioStreamer(meter: indicator.meter) { data in
-                buffer.append(data)
+            if let reused = pendingStreamer {
+                // The mic never stopped: flip its audio feed from wake-word
+                // detection to the dictation buffer. Instant, gapless start.
+                reused.setSink { data in
+                    buffer.append(data)
+                }
+                audioStreamer = reused
+                pendingStreamer = nil
+                recordingStartedAt = Date()
+                markLatency("mic handed off")
+            } else {
+                let streamer = LiveAudioStreamer(meter: indicator.meter) { data in
+                    buffer.append(data)
+                }
+                try streamer.start()
+                audioStreamer = streamer
+                recordingStartedAt = Date()
+                markLatency("mic started")
             }
-            try streamer.start()
-            audioStreamer = streamer
-            recordingStartedAt = Date()
-            markLatency("mic started")
         } catch {
             activeRecordingID = nil
             audioBuffer = nil
@@ -1080,10 +1098,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lastWakeTriggerSamples = samples
         latestWakeConfidence = confidence
         latestWakeStreak = 2
-        stopWakeWordListener()
+        // Take the live mic session instead of tearing it down; dictation
+        // starts on the same audio engine with zero gap.
+        let handedOffStreamer = wakeWordListener.detachStreamer()
+        stopHandsFreeIdleMonitor()
         setStatus(String(format: "Wake heard %.2f", confidence))
         isHandsFreeRecording = true
-        startRecording(locked: true)
+        startRecording(locked: true, reusing: handedOffStreamer)
         if activeRecordingID != nil {
             startHandsFreeSilenceMonitor()
         } else {
@@ -1121,9 +1142,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        guard elapsed >= 2.0 else { return }
+        guard elapsed >= 1.2 else { return }
 
-        if handsFreeSpeechDetected, let handsFreeLastVoiceAt, now.timeIntervalSince(handsFreeLastVoiceAt) >= 1.5 {
+        if handsFreeSpeechDetected, let handsFreeLastVoiceAt, now.timeIntervalSince(handsFreeLastVoiceAt) >= 1.25 {
             setStatus("Silence detected")
             stopRecording()
         } else if !handsFreeSpeechDetected, elapsed >= 8.0 {
