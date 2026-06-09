@@ -157,59 +157,12 @@ private struct IndicatorRoot: View {
         .padding(.bottom, 18)
     }
 
-    // A larger glass pill makes the listening state obvious without showing extra text.
+    // No pill, no border: just the light trails floating over the screen.
     private var glyphPill: some View {
-        let shape = RoundedRectangle(cornerRadius: 17, style: .continuous)
-        return HStack(spacing: 6.5) {
-            MicBadge()
-
-            Rectangle()
-                .fill(Color.white.opacity(0.10))
-                .frame(width: 1, height: 19)
-
-            Group {
-                switch model.state {
-                case .recording:
-                    WaveBars(meter: model.meter)
-                case .processing:
-                    HStack {
-                        Spacer(minLength: 0)
-                        ProcessingSpinner()
-                        Spacer(minLength: 0)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .padding(.leading, 6.5)
-        .padding(.trailing, 10.5)
-        .frame(width: 216, height: 34)
-        .background(
-            LinearGradient(
-                colors: [Color.black.opacity(0.98), Color(red: 0.08, green: 0.08, blue: 0.08).opacity(0.96)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .clipShape(shape)
-        )
-        .overlay(
-            shape
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.22), Color.white.opacity(0.08)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 0.9
-                )
-        )
-        .overlay(
-            shape
-                .strokeBorder(Color.black.opacity(0.9), lineWidth: 1)
-                .padding(1)
-        )
-        .clipShape(shape)
-        .shadow(color: .black.opacity(0.32), radius: 9, x: 0, y: 3)
+        LightWaves(meter: model.meter, state: model.state)
+            .frame(width: 300, height: 48)
+            // A whisper of dark shadow keeps the trails readable on white pages.
+            .shadow(color: .black.opacity(0.45), radius: 2.5, x: 0, y: 1)
     }
 }
 
@@ -227,69 +180,147 @@ private struct VisualEffectBackground: NSViewRepresentable {
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
-private struct MicBadge: View {
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color.white.opacity(0.06))
-            Circle()
-                .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.9)
-            Image(systemName: "mic.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color.white)
-                .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
-        }
-        .frame(width: 26, height: 26)
-    }
+/// Braided strands of warm light that breathe with the voice, inspired by
+/// long-exposure light trails. Pure Canvas drawing on a timeline, so it never
+/// touches the audio or network path.
+/// Each strand is one thin ribbon of light with its own rhythm, so the
+/// bundle weaves and crosses instead of moving in lockstep.
+private struct WaveStrand: Sendable {
+    let cycles: Double      // full waves across the pill
+    let weave: Double       // slow secondary undulation
+    let speed: Double       // drift speed (points per second of phase)
+    let phase: Double
+    let amp: CGFloat        // share of the available height
+    let brightness: CGFloat
 }
 
-/// A compact waveform with travelling motion, so speech feels alive instead of
-/// just scaling a fixed row of bars.
-private struct WaveBars: View {
-    let meter: AudioLevelMeter
-
-    private let weights: [CGFloat] = [
-        0.20, 0.32, 0.52, 0.76, 0.64, 0.38,
-        0.28, 0.58, 0.90, 0.74, 0.48, 0.34,
-        0.46, 0.82, 1.00, 0.88, 0.62, 0.40,
-        0.34, 0.68, 0.96, 0.78, 0.54, 0.36,
-        0.26, 0.50, 0.72, 0.56, 0.40, 0.28,
-        0.22, 0.18
+/// Design constants live at file scope so the nonisolated WaveState class
+/// can read them without tripping main-actor isolation.
+private enum WaveDesign {
+    static let strands: [WaveStrand] = [
+        WaveStrand(cycles: 1.6, weave: 0.7, speed: 1.9, phase: 0.0, amp: 1.00, brightness: 1.00),
+        WaveStrand(cycles: 2.1, weave: 0.5, speed: -1.4, phase: 2.1, amp: 0.85, brightness: 0.80),
+        WaveStrand(cycles: 1.3, weave: 0.9, speed: 1.1, phase: 4.0, amp: 0.70, brightness: 0.66),
+        WaveStrand(cycles: 2.6, weave: 0.4, speed: -2.3, phase: 1.2, amp: 0.55, brightness: 0.55),
+        WaveStrand(cycles: 1.9, weave: 0.6, speed: 0.7, phase: 5.1, amp: 0.42, brightness: 0.45)
     ]
+
+    /// ~0.8s of voice history at 45fps; a syllable takes that long to travel
+    /// from the center out to the tips, so the wave calms fast after speech.
+    static let historyCount = 36
+}
+
+private struct LightWaves: View {
+    let meter: AudioLevelMeter
+    let state: IndicatorState
+
+    private static let coreColor = Color(red: 1.0, green: 0.97, blue: 0.90)
+    private static let glowColor = Color(red: 1.0, green: 0.80, blue: 0.55)
+
+    /// Mutable per-frame state. Holds the loudness history that sculpts the
+    /// wave, and the accumulated phase per strand so speed changes smoothly.
+    private final class WaveState {
+        var levels: [CGFloat] = Array(repeating: 0, count: WaveDesign.historyCount)
+        var phases: [Double] = WaveDesign.strands.map(\.phase)
+        var lastTime: TimeInterval?
+
+        func push(_ level: CGFloat) {
+            levels.removeFirst()
+            levels.append(level)
+        }
+    }
+
+    @State private var waveState = WaveState()
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 45.0)) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let level = CGFloat(meter.value)
-            HStack(spacing: 2.15) {
-                ForEach(weights.indices, id: \.self) { index in
-                    Capsule()
-                        .fill(Color.white.opacity(barOpacity(index, t, level)))
-                        .frame(width: 1.35, height: barHeight(index, t, level))
-                        .animation(.interactiveSpring(response: 0.16, dampingFraction: 0.74), value: level)
+            Canvas { context, size in
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                let isProcessing = state == .processing
+                let level = isProcessing ? 0 : CGFloat(meter.value)
+                let voice = min(1, pow(max(level, 0.0001) * 2.4, 0.72))
+
+                // Record this instant; the buffer IS the wave's shape.
+                waveState.push(voice)
+
+                // Advance each strand by elapsed time. Speech winds the braid
+                // up to ~4x idle speed; silence lets it relax. Accumulating
+                // phase (instead of multiplying time) avoids jumps.
+                let dt = min(0.1, t - (waveState.lastTime ?? t))
+                waveState.lastTime = t
+                let tempo = isProcessing ? 0.3 : 0.55 + Double(voice) * 3.4
+                for index in WaveDesign.strands.indices {
+                    waveState.phases[index] += dt * WaveDesign.strands[index].speed * tempo
+                }
+
+                let dim: CGFloat = isProcessing ? 0.55 : 0.62 + 0.38 * voice
+                let midY = size.height / 2
+                let halfHeight = (size.height / 2) - 2
+                let breathing = 0.10 + 0.035 * CGFloat(sin(t * 1.8))
+
+                for (index, strand) in WaveDesign.strands.enumerated() {
+                    let path = strandPath(
+                        strand,
+                        phase: waveState.phases[index],
+                        size: size,
+                        midY: midY,
+                        halfHeight: halfHeight,
+                        breathing: breathing
+                    )
+                    let glow = strand.brightness * dim
+                    // Dark contour first so the trails stay visible over white
+                    // pages now that the glass pill is gone, then the light.
+                    context.stroke(path, with: .color(Color.black.opacity(0.20 * glow)), lineWidth: 5.6)
+                    context.stroke(path, with: .color(Self.glowColor.opacity(0.12 * glow)), lineWidth: 4.4)
+                    context.stroke(path, with: .color(Self.glowColor.opacity(0.28 * glow)), lineWidth: 2.1)
+                    context.stroke(path, with: .color(Self.coreColor.opacity(0.95 * glow)), lineWidth: 1.0)
                 }
             }
-            .frame(width: 142, height: 22)
         }
     }
 
-    private func barHeight(_ index: Int, _ t: TimeInterval, _ level: CGFloat) -> CGFloat {
-        let base: CGFloat = 2.2
-        let maxHeight: CGFloat = 19.5
-        let voice = min(1, pow(max(level, 0.001) * 2.9, 0.68))
-        let indexPhase = Double(index) * 0.58
-        let travel = 0.5 + 0.5 * sin(t * (5.8 + Double(voice) * 3.4) - indexPhase)
-        let shimmer = 0.5 + 0.5 * sin(t * 11.0 + Double(index) * 1.37)
-        let idle = 0.08 + 0.10 * CGFloat(travel)
-        let spoken = voice * weights[index] * (0.54 + 0.34 * CGFloat(travel) + 0.12 * CGFloat(shimmer))
-        let edgeFade = min(1, CGFloat(min(index + 2, weights.count - index + 1)) / 6)
-        return base + min(1, idle + spoken) * maxHeight * edgeFade
-    }
+    private func strandPath(
+        _ strand: WaveStrand,
+        phase: Double,
+        size: CGSize,
+        midY: CGFloat,
+        halfHeight: CGFloat,
+        breathing: CGFloat
+    ) -> Path {
+        var path = Path()
+        let width = size.width
+        let step: CGFloat = 2.0
+        let levels = waveState.levels
+        let lastIndex = levels.count - 1
+        var x: CGFloat = 0
+        while x <= width {
+            let u = Double(x / width)
+            // Pinch both ends to points, like light trails converging.
+            let taper = pow(max(0, 4 * u * (1 - u)), 0.85)
 
-    private func barOpacity(_ index: Int, _ t: TimeInterval, _ level: CGFloat) -> CGFloat {
-        let edgeFade = min(1, CGFloat(min(index + 3, weights.count - index + 2)) / 8)
-        let pulse = 0.5 + 0.5 * sin(t * 4.6 - Double(index) * 0.42)
-        return min(1, 0.42 + edgeFade * 0.36 + min(1, level * 2.4) * 0.18 + CGFloat(pulse) * 0.08)
+            // Each point shows the loudness from a moment ago: "now" lives at
+            // the center, older sound rides outward toward the tips. The power
+            // curve dedicates the middle third of the wave to the most recent
+            // instants, so a syllable lights up a wide band immediately.
+            let distance = abs(u - 0.5) * 2
+            let age = pow(distance, 1.7)
+            let historyIndex = max(0, lastIndex - Int(age * Double(lastIndex)))
+            // Older ripples shrink as they travel out, so the wave visibly
+            // relaxes the moment the speaker goes quiet.
+            let ripple = levels[historyIndex] * CGFloat(1 - age * 0.45)
+
+            let amplitude = halfHeight * strand.amp * (breathing + ripple * 0.95)
+            let main = sin(2 * .pi * strand.cycles * u + phase)
+            let weave = sin(2 * .pi * strand.weave * u - phase * 0.6 + strand.phase * 1.7)
+            let y = midY + amplitude * CGFloat(taper * (main * 0.78 + weave * 0.22))
+            if x == 0 {
+                path.move(to: CGPoint(x: x, y: y))
+            } else {
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+            x += step
+        }
+        return path
     }
 }
 
@@ -316,32 +347,3 @@ private struct PreviewLabel: View {
     }
 }
 
-private struct ProcessingSpinner: View {
-    @State private var spin = false
-
-    var body: some View {
-        HStack(spacing: 20) {
-            Circle()
-                .trim(from: 0, to: 0.82)
-                .stroke(
-                    AngularGradient(
-                        colors: [Color.white.opacity(0.14), Color.white.opacity(0.96)],
-                        center: .center
-                    ),
-                    style: StrokeStyle(lineWidth: 2.2, lineCap: .round)
-                )
-                .frame(width: 15, height: 15)
-                .rotationEffect(.degrees(spin ? 360 : 0))
-                .onAppear {
-                    withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
-                        spin = true
-                    }
-                }
-
-            Text("Finalizing")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.72))
-        }
-        .frame(width: 142, height: 22)
-    }
-}
