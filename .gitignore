@@ -19,3 +19,4 @@ SwiftMarathiDictation/dist/
 *.p12
 *.mobileprovision
 secrets.env
+*.log

@@ -25,15 +25,29 @@ After opening the DMG, drag `Indic Dictation.app` to `Applications`, launch it, 
 ## What it does
 
 - Runs as a native Swift menu bar app.
-- Streams 16 kHz PCM microphone audio to Sarvam Saaras v3.
+- Streams 16 kHz PCM microphone audio to Sarvam Saaras v3, resampled with a
+  proper anti-aliasing converter for the cleanest possible input audio.
 - Translates Marathi speech to English while recording.
 - Automatically inserts the English translation into the focused app.
+- Pastes near-instantly on release: the app tracks the server's voice
+  activity signals and skips the flush wait entirely when every spoken
+  utterance has already been finalized.
+- Keeps a pre-connected Sarvam WebSocket warm with keepalive pings, so the
+  first words of a dictation never wait on a connection handshake.
 - Supports hold-to-record and double-tap lock recording modes.
 - Supports Escape to cancel the current or finalizing dictation without pasting.
 - Lets the shortcut be changed from the menu bar.
 - Lets the microphone input be selected from the menu bar.
-- Uses accuracy-first streaming defaults that still feel fast in normal use.
-- Shows a small bottom-center floating indicator while recording and processing, with optional live English preview.
+- Accepts vocabulary hints (names, jargon) from the menu bar and sends them
+  to Sarvam as an ASR prompt so unusual words come out right.
+- Optional polish layer: routes the final text through a fast LLM via
+  OpenRouter to fix grammar, drop filler words, and structure the result
+  into short paragraphs before pasting. Falls back to the raw text on any
+  error or timeout, so a dictation is never lost.
+- Shows a floating voice-reactive indicator: braided strands of warm light
+  whose ripples are sculpted from your live microphone level, with an
+  optional live English preview above it.
+- Surfaces real Sarvam server errors instead of a generic "no speech" message.
 - Includes a debug window for permissions, current shortcut, microphone, target, latency marks, and last English result.
 
 ## Setup
@@ -58,6 +72,23 @@ export SARVAM_API_KEY="your_key_here"
 ```
 
 Do not commit real API keys. `.env`, `.env.*`, key files, app bundles, build folders, recordings, and generated outputs are ignored by git.
+
+### Optional: polish layer (OpenRouter)
+
+The `Polish Responses` menu toggle sends the final English text through
+`google/gemini-2.5-flash-lite` on OpenRouter (benchmarked at ~0.85s for a
+typical dictation) to clean grammar and structure the text into short
+paragraphs. To enable it, provide an OpenRouter API key in the shell
+environment or `~/.config/shell/secrets.env`:
+
+```bash
+export INDIC_DICTATION_OPENROUTER_API_KEY="your_key_here"
+# or the general fallback:
+export OPENROUTER_API_KEY="your_key_here"
+```
+
+Texts shorter than 40 characters skip polishing. Any API failure, timeout,
+or empty response silently falls back to the raw Sarvam text.
 
 Python MVP dependencies are still available for fallback testing:
 
@@ -132,13 +163,20 @@ Use the menu bar menu to:
 - Choose the shortcut.
 - Choose the microphone input or refresh connected microphones.
 - Toggle the live preview text.
+- Toggle `Polish Responses` (LLM cleanup before pasting).
+- Edit `Vocabulary Hints...` (names and jargon sent to Sarvam as an ASR prompt).
 - Copy the last English result.
 - Check experimental wake-word setup.
 - Run paste and focused-target diagnostics.
 - Open permission settings.
 - Open the debug window.
 
-The bottom-center indicator shows animated voice bars while recording and a spinner while translating.
+The bottom-center indicator draws braided strands of warm light. The wave
+shape comes from a rolling buffer of the live microphone level: each syllable
+is born as a ripple at the center and travels outward, the strands speed up
+and brighten with your voice, and the whole braid settles to a calm line the
+moment you stop speaking. While the text is finalizing, the braid dims and
+slows instead of showing a spinner.
 
 ## Experimental wake word
 
@@ -207,6 +245,8 @@ The menu bar app shows a permission summary and has direct links to the relevant
 ## Privacy and API keys
 
 - Audio is captured locally and streamed to Sarvam for speech-to-text translation.
+- When `Polish Responses` is enabled, the final English text (text only, never
+  audio) is also sent to OpenRouter for cleanup. The toggle is off by default.
 - Final English text is inserted into the currently focused app on your Mac.
 - Normal app users store their Sarvam API key in macOS Keychain.
 - Developer builds can also read `SARVAM_API_KEY` from the local environment or `~/.config/shell/secrets.env`.
@@ -217,9 +257,9 @@ The menu bar app shows a permission summary and has direct links to the relevant
 ## Roadmap
 
 - Configurable source language selection for additional Indic languages.
+- Faster, more reliable hands-free wake-word activation.
+- Selectable quality mode (fast / balanced / accurate) from the menu bar.
 - Cleaner first-run permission onboarding.
-- Better streaming diagnostics for latency and network failures.
-- Optional post-processing layer for tone, grammar, and formatting.
 - Automated tests for shortcut state, settings, and Sarvam response parsing.
 
 ## Contributing
