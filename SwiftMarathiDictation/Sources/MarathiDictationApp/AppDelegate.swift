@@ -41,6 +41,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let recorder = AudioRecorder()
     private let indicator = VoiceIndicator()
+    // Soft confirmation that the wake word was heard, for when the user is
+    // not looking at the screen. Quiet enough not to bleed into the mic.
+    private let wakeChime: NSSound? = {
+        let sound = NSSound(named: "Glass")
+        sound?.volume = 0.25
+        return sound
+    }()
     private let functionKeyMonitor = FunctionKeyMonitor()
     private let wakeSampleRecorder = WakeWordSampleRecorder()
     private lazy var wakeWordListener = WakeWordListener(meter: indicator.meter)
@@ -1098,6 +1105,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lastWakeTriggerSamples = samples
         latestWakeConfidence = confidence
         latestWakeStreak = 2
+        wakeChime?.stop()
+        wakeChime?.play()
         // Take the live mic session instead of tearing it down; dictation
         // starts on the same audio engine with zero gap.
         let handedOffStreamer = wakeWordListener.detachStreamer()
